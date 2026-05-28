@@ -262,8 +262,9 @@ input[type="color"] {
       <button class="btn btn-primary" id="btnSTL">⬇ Download STL</button>
       <button class="btn btn-secondary" id="btnGLB">⬇ Download GLB</button>
       <button class="btn btn-secondary" id="btn3MF">⬇ Download 3MF</button>
+      <button class="btn btn-secondary" id="btn3MFMulti">⬇ Multi-Color 3MF</button>
     </div>
-    <p class="hint">STL / 3MF — ideal for 3D printing.<br>GLB — preserves plate &amp; text colors.<br>3MF includes colors for compatible slicers.</p>
+    <p class="hint">STL / 3MF — ideal for 3D printing.<br>GLB — preserves plate &amp; text colors.<br>Multi-Color 3MF — plate and text as separate parts for multi-filament printers.</p>
   </div>
 
   <div class="divider"></div>
@@ -773,90 +774,101 @@ function _buildMeshXML(geometry, objectId) {
   return parts.join('');
 }
 
-document.getElementById('btn3MF').addEventListener('click', () => {
-  const p = readParams();
-  const enc = new TextEncoder();
-
-  // Build plate geometry
+// ── 3MF shared builder ────────────────────────────────────────────────────────
+// multicolor=false → plate + text merged as one component (single-filament).
+// multicolor=true  → plate and text as separate build items (multi-filament).
+function _make3mfBlob(p, multicolor) {
   const plateGeoNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true).toNonIndexed();
 
-  let hasText = false;
   let textGeoNI = null;
-  if (p.text.trim().length > 0) {
+  const hasText = p.text.trim().length > 0;
+  if (hasText) {
     const font = loadedFonts.get(p.fontUrl);
-    if (!font) { alert('Fonts still loading — please try again in a moment.'); return; }
+    if (!font) { alert('Fonts still loading — please try again in a moment.'); return null; }
     const tg = buildTextGeometry(p.text, font, p.fontSize, p.raise, p.thickness, true);
     textGeoNI = tg.index ? tg.toNonIndexed() : tg;
-    hasText = true;
   }
 
-  // Bake print orientation before building XML.
   applyPrintTransform(plateGeoNI, p.thickness);
   if (textGeoNI) applyPrintTransform(textGeoNI, p.thickness);
 
-  // Build XML resources: plate as object 1, optional text as object 2, combined build item.
-  const plateMeshXML = _buildMeshXML(plateGeoNI, 1);
-  const textMeshXML  = hasText ? _buildMeshXML(textGeoNI, 2) : '';
-
-  const buildItems = hasText
-    ? '<item objectid="3"/>'
-    : '<item objectid="1"/>';
-
-  // Component object combines plate + text when text is present.
-  const componentObj = hasText ? `
-    <object id="3" type="model"><components>
-      <component objectid="1"/>
-      <component objectid="2"/>
-    </components></object>` : '';
-
-  // Color attributes use the materials extension.
   const matNS = 'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"';
-  const colorGroups = hasText ? `
-    <m:colorgroup id="10"><m:color color="${p.plateColor}"/></m:colorgroup>
-    <m:colorgroup id="11"><m:color color="${p.textColor}"/></m:colorgroup>` : '';
 
-  const plateColorAttr = hasText ? ' m:colorid="10"' : '';
-  const textColorAttr  = hasText ? ' m:colorid="11"' : '';
+  // Always embed colors via the materials extension.
+  const colorGroups = `
+  <m:colorgroup id="10"><m:color color="${p.plateColor}"/></m:colorgroup>
+  <m:colorgroup id="11"><m:color color="${p.textColor}"/></m:colorgroup>`;
 
-  // Inject color attributes into the object tags.
-  const plateMeshXMLColored = plateMeshXML.replace('<object id="1"', `<object id="1"${plateColorAttr}`);
-  const textMeshXMLColored  = hasText ? textMeshXML.replace('<object id="2"', `<object id="2"${textColorAttr}`) : '';
+  const plateMeshXML = _buildMeshXML(plateGeoNI, 1)
+    .replace('<object id="1"', '<object id="1" m:colorid="10"');
+  const textMeshXML = hasText
+    ? _buildMeshXML(textGeoNI, 2).replace('<object id="2"', '<object id="2" m:colorid="11"')
+    : '';
+
+  let resourcesExtra = '';
+  let buildItems = '';
+
+  if (multicolor) {
+    // Two separate build items — each gets its own filament in the slicer.
+    buildItems = hasText
+      ? '<item objectid="1"/><item objectid="2"/>'
+      : '<item objectid="1"/>';
+  } else {
+    // Single component wrapping both — one printable body.
+    if (hasText) {
+      resourcesExtra = `
+  <object id="3" type="model"><components>
+    <component objectid="1"/>
+    <component objectid="2"/>
+  </components></object>`;
+      buildItems = '<item objectid="3"/>';
+    } else {
+      buildItems = '<item objectid="1"/>';
+    }
+  }
 
   const modelXML = `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US"
   xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
-  ${hasText ? matNS : ''}>
+  ${matNS}>
 <resources>
   ${colorGroups}
-  ${plateMeshXMLColored}
-  ${textMeshXMLColored}
-  ${componentObj}
+  ${plateMeshXML}
+  ${textMeshXML}
+  ${resourcesExtra}
 </resources>
 <build>${buildItems}</build>
 </model>`;
 
-  const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
+  const enc = new TextEncoder();
+  const zip = _makeZip([
+    { name: '[Content_Types].xml', data: enc.encode(`<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
-</Types>`;
-
-  const rels = `<?xml version="1.0" encoding="UTF-8"?>
+</Types>`) },
+    { name: '_rels/.rels', data: enc.encode(`<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rel0" Target="/3D/3dmodel.model"
     Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
-</Relationships>`;
-
-  const zip = _makeZip([
-    { name: '[Content_Types].xml', data: enc.encode(contentTypes) },
-    { name: '_rels/.rels',         data: enc.encode(rels) },
-    { name: '3D/3dmodel.model',    data: enc.encode(modelXML) },
+</Relationships>`) },
+    { name: '3D/3dmodel.model', data: enc.encode(modelXML) },
   ]);
-
-  triggerDownload(new Blob([zip], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+zip' }), 'label.3mf');
 
   plateGeoNI.dispose();
   if (textGeoNI) textGeoNI.dispose();
+
+  return new Blob([zip], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+zip' });
+}
+
+document.getElementById('btn3MF').addEventListener('click', () => {
+  const blob = _make3mfBlob(readParams(), false);
+  if (blob) triggerDownload(blob, 'label.3mf');
+});
+
+document.getElementById('btn3MFMulti').addEventListener('click', () => {
+  const blob = _make3mfBlob(readParams(), true);
+  if (blob) triggerDownload(blob, 'label_multicolor.3mf');
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
