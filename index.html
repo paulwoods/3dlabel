@@ -257,8 +257,9 @@ input[type="color"] {
     <div class="btn-row">
       <button class="btn btn-primary" id="btnSTL">⬇ Download STL</button>
       <button class="btn btn-secondary" id="btnGLB">⬇ Download GLB</button>
+      <button class="btn btn-secondary" id="btn3MF">⬇ Download 3MF</button>
     </div>
-    <p class="hint">STL — ideal for 3D printing (single color).<br>GLB — preserves plate &amp; text colors.</p>
+    <p class="hint">STL / 3MF — ideal for 3D printing.<br>GLB — preserves plate &amp; text colors.<br>3MF includes colors for compatible slicers.</p>
   </div>
 
   <div class="divider"></div>
@@ -559,6 +560,211 @@ document.getElementById('btnGLB').addEventListener('click', async () => {
     console.error('GLB export error:', e);
     alert('GLB export failed: ' + e.message);
   }
+});
+
+// ── 3MF export ────────────────────────────────────────────────────────────────
+// Minimal ZIP (STORE, no compression) — avoids external dependency.
+
+const _CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c;
+  }
+  return t;
+})();
+
+function _crc32(data) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < data.length; i++) crc = _CRC_TABLE[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function _concat(arrays) {
+  const total = arrays.reduce((s, a) => s + a.length, 0);
+  const out = new Uint8Array(total);
+  let pos = 0;
+  for (const a of arrays) { out.set(a, pos); pos += a.length; }
+  return out;
+}
+
+function _makeZip(files) {
+  // files: [ { name: string, data: Uint8Array } ]
+  const enc = new TextEncoder();
+  const locals = [];
+  const cdParts = [];
+  let localOffset = 0;
+
+  for (const { name, data } of files) {
+    const nameBytes = enc.encode(name);
+    const crc = _crc32(data);
+
+    const local = new Uint8Array(30 + nameBytes.length + data.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0,  0x04034b50, true); // local sig
+    lv.setUint16(4,  20, true);         // version needed
+    lv.setUint16(6,  0,  true);         // flags
+    lv.setUint16(8,  0,  true);         // STORE
+    lv.setUint16(10, 0,  true);         // mod time
+    lv.setUint16(12, 0,  true);         // mod date
+    lv.setUint32(14, crc,         true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true);          // extra len
+    local.set(nameBytes, 30);
+    local.set(data, 30 + nameBytes.length);
+    locals.push(local);
+
+    const cd = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0,  0x02014b50, true); // central dir sig
+    cv.setUint16(4,  20, true);
+    cv.setUint16(6,  20, true);
+    cv.setUint16(8,  0,  true);
+    cv.setUint16(10, 0,  true);         // STORE
+    cv.setUint16(12, 0,  true);
+    cv.setUint16(14, 0,  true);
+    cv.setUint32(16, crc,         true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, localOffset, true);
+    cd.set(nameBytes, 46);
+    cdParts.push(cd);
+
+    localOffset += local.length;
+  }
+
+  const cdData  = _concat(cdParts);
+  const eocd    = new Uint8Array(22);
+  const ev      = new DataView(eocd.buffer);
+  ev.setUint32(0,  0x06054b50,   true);
+  ev.setUint16(4,  0,            true);
+  ev.setUint16(6,  0,            true);
+  ev.setUint16(8,  files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdData.length, true);
+  ev.setUint32(16, localOffset,  true);
+  ev.setUint16(20, 0,            true);
+
+  return _concat([...locals, cdData, eocd]);
+}
+
+function _buildMeshXML(geometry, objectId) {
+  // Deduplicate vertices with 3-decimal precision for compact output.
+  const pos = geometry.attributes.position;
+  const vMap = new Map();
+  const vList = [];
+  const tris  = [];
+
+  for (let i = 0; i < pos.count; i += 3) {
+    const idx = [];
+    for (let j = 0; j < 3; j++) {
+      const x = pos.getX(i + j).toFixed(3);
+      const y = pos.getY(i + j).toFixed(3);
+      const z = pos.getZ(i + j).toFixed(3);
+      const k = `${x},${y},${z}`;
+      if (!vMap.has(k)) { vMap.set(k, vList.length); vList.push([x, y, z]); }
+      idx.push(vMap.get(k));
+    }
+    tris.push(idx);
+  }
+
+  const parts = [`<object id="${objectId}" type="model"><mesh><vertices>`];
+  for (const [x, y, z] of vList) parts.push(`<vertex x="${x}" y="${y}" z="${z}"/>`);
+  parts.push('</vertices><triangles>');
+  for (const [v1, v2, v3] of tris) parts.push(`<triangle v1="${v1}" v2="${v2}" v3="${v3}"/>`);
+  parts.push('</triangles></mesh></object>');
+  return parts.join('');
+}
+
+document.getElementById('btn3MF').addEventListener('click', () => {
+  const p = readParams();
+  const enc = new TextEncoder();
+
+  // Build plate geometry
+  const plateGeoNI = new THREE.BoxGeometry(p.length, p.thickness, p.width).toNonIndexed();
+
+  let hasText = false;
+  let textGeoNI = null;
+  if (p.text.trim().length > 0) {
+    const font = loadedFonts.get(p.fontUrl);
+    if (!font) { alert('Fonts still loading — please try again in a moment.'); return; }
+    const tg = buildTextGeometry(p.text, font, p.fontSize, p.raise, p.thickness, true);
+    textGeoNI = tg.index ? tg.toNonIndexed() : tg;
+    hasText = true;
+  }
+
+  // Build XML resources: plate as object 1, optional text as object 2, combined build item.
+  const plateMeshXML = _buildMeshXML(plateGeoNI, 1);
+  const textMeshXML  = hasText ? _buildMeshXML(textGeoNI, 2) : '';
+
+  const buildItems = hasText
+    ? '<item objectid="3"/>'
+    : '<item objectid="1"/>';
+
+  // Component object combines plate + text when text is present.
+  const componentObj = hasText ? `
+    <object id="3" type="model"><components>
+      <component objectid="1"/>
+      <component objectid="2"/>
+    </components></object>` : '';
+
+  // Color attributes use the materials extension.
+  const matNS = 'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"';
+  const colorGroups = hasText ? `
+    <m:colorgroup id="10"><m:color color="${p.plateColor}"/></m:colorgroup>
+    <m:colorgroup id="11"><m:color color="${p.textColor}"/></m:colorgroup>` : '';
+
+  const plateColorAttr = hasText ? ' m:colorid="10"' : '';
+  const textColorAttr  = hasText ? ' m:colorid="11"' : '';
+
+  // Inject color attributes into the object tags.
+  const plateMeshXMLColored = plateMeshXML.replace('<object id="1"', `<object id="1"${plateColorAttr}`);
+  const textMeshXMLColored  = hasText ? textMeshXML.replace('<object id="2"', `<object id="2"${textColorAttr}`) : '';
+
+  const modelXML = `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US"
+  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+  ${hasText ? matNS : ''}>
+<resources>
+  ${colorGroups}
+  ${plateMeshXMLColored}
+  ${textMeshXMLColored}
+  ${componentObj}
+</resources>
+<build>${buildItems}</build>
+</model>`;
+
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+</Types>`;
+
+  const rels = `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rel0" Target="/3D/3dmodel.model"
+    Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+</Relationships>`;
+
+  const zip = _makeZip([
+    { name: '[Content_Types].xml', data: enc.encode(contentTypes) },
+    { name: '_rels/.rels',         data: enc.encode(rels) },
+    { name: '3D/3dmodel.model',    data: enc.encode(modelXML) },
+  ]);
+
+  triggerDownload(new Blob([zip], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+zip' }), 'label.3mf');
+
+  plateGeoNI.dispose();
+  if (textGeoNI) textGeoNI.dispose();
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
