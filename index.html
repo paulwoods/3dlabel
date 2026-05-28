@@ -502,6 +502,18 @@ syncColor('textColor',  'textColorHex');
 
 document.getElementById('btnResetCamera').addEventListener('click', fitCamera);
 
+// ── Print-orientation transform ───────────────────────────────────────────────
+// Three.js is Y-up; slicers (Bambu Studio, PrusaSlicer) are Z-up.
+// Without correction the model exports sideways and slicers lay the wrong face
+// on the build plate.  This bakes the correct orientation into the geometry:
+//   Rx(+90°) maps Three.js Y → slicer Z, then translate so the plate bottom
+//   (y = -thickness/2) lands at slicer Z = 0.
+function applyPrintTransform(geo, thickness) {
+  const R = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+  const T = new THREE.Matrix4().makeTranslation(0, 0, thickness / 2);
+  geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(T, R));
+}
+
 // ── Download helper ───────────────────────────────────────────────────────────
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -534,6 +546,8 @@ document.getElementById('btnSTL').addEventListener('click', () => {
   } else {
     exportGeo = plateNI;
   }
+
+  applyPrintTransform(exportGeo, p.thickness);
 
   const tmpScene = new THREE.Scene();
   tmpScene.add(new THREE.Mesh(exportGeo, new THREE.MeshStandardMaterial()));
@@ -701,6 +715,10 @@ document.getElementById('btn3MF').addEventListener('click', () => {
     textGeoNI = tg.index ? tg.toNonIndexed() : tg;
     hasText = true;
   }
+
+  // Bake print orientation before building XML.
+  applyPrintTransform(plateGeoNI, p.thickness);
+  if (textGeoNI) applyPrintTransform(textGeoNI, p.thickness);
 
   // Build XML resources: plate as object 1, optional text as object 2, combined build item.
   const plateMeshXML = _buildMeshXML(plateGeoNI, 1);
