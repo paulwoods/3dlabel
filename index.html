@@ -479,20 +479,46 @@ function scheduleRebuild() {
   rebuildTimer = setTimeout(rebuildScene, 80);
 }
 
+// ── LocalStorage persistence ──────────────────────────────────────────────────
+const STORAGE_KEY = '3dlabel_v1';
+const PERSISTED_IDS = ['length','width','thickness','text','font','fontSize','raise','plateColor','textColor'];
+
+function saveToStorage() {
+  const data = {};
+  PERSISTED_IDS.forEach(id => { data[id] = document.getElementById(id).value; });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function loadFromStorage() {
+  try {
+    const data = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (!data) return;
+    PERSISTED_IDS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el && data[id] !== undefined) el.value = data[id];
+    });
+    // Keep hex text fields in sync with restored colour picker values.
+    document.getElementById('plateColorHex').value = document.getElementById('plateColor').value;
+    document.getElementById('textColorHex').value  = document.getElementById('textColor').value;
+  } catch (_) { /* corrupt storage — ignore */ }
+}
+
 ['length','width','thickness','text','fontSize','raise'].forEach(id =>
-  document.getElementById(id).addEventListener('input', scheduleRebuild)
+  document.getElementById(id).addEventListener('input', () => { saveToStorage(); scheduleRebuild(); })
 );
-document.getElementById('font').addEventListener('change', scheduleRebuild);
+document.getElementById('font').addEventListener('change', () => { saveToStorage(); scheduleRebuild(); });
 
 // Sync colour pickers ↔ hex text fields
 function syncColor(pickerId, hexId) {
   document.getElementById(pickerId).addEventListener('input', e => {
     document.getElementById(hexId).value = e.target.value;
+    saveToStorage();
     scheduleRebuild();
   });
   document.getElementById(hexId).addEventListener('input', e => {
     if (/^#[0-9a-f]{6}$/i.test(e.target.value)) {
       document.getElementById(pickerId).value = e.target.value;
+      saveToStorage();
       scheduleRebuild();
     }
   });
@@ -795,6 +821,9 @@ async function init() {
     opt.textContent = f.label;
     sel.appendChild(opt);
   });
+
+  // Restore saved values (must happen after options are in the DOM).
+  loadFromStorage();
 
   // Load all fonts in parallel
   const loader = new FontLoader();
