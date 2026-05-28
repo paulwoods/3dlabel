@@ -200,13 +200,15 @@ input[type="color"] {
         <input type="number" id="width" value="50" min="1" max="500" step="1">
       </div>
     </div>
-    <div class="field">
-      <label for="thickness">Thickness (mm)</label>
-      <input type="number" id="thickness" value="5" min="0.5" max="50" step="0.5">
-    </div>
-    <div class="field">
-      <label for="radius">Corner Radius (mm)</label>
-      <input type="number" id="radius" value="5" min="0" max="100" step="0.5">
+    <div class="row2">
+      <div class="field">
+        <label for="radius">Corner Radius (mm)</label>
+        <input type="number" id="radius" value="5" min="0" max="100" step="0.5">
+      </div>
+      <div class="field">
+        <label for="thickness">Thickness (mm)</label>
+        <input type="number" id="thickness" value="5" min="0.5" max="50" step="0.5">
+      </div>
     </div>
   </div>
 
@@ -238,18 +240,20 @@ input[type="color"] {
 
   <div class="section">
     <div class="section-title">Colors</div>
-    <div class="field">
-      <label>Plate Color</label>
-      <div class="color-row">
-        <input type="color" id="plateColor" value="#2255aa">
-        <input type="text" class="color-hex" id="plateColorHex" value="#2255aa" maxlength="7" spellcheck="false">
+    <div class="row2">
+      <div class="field">
+        <label>Plate Color</label>
+        <div class="color-row">
+          <input type="color" id="plateColor" value="#2255aa">
+          <input type="text" class="color-hex" id="plateColorHex" value="#2255aa" maxlength="7" spellcheck="false">
+        </div>
       </div>
-    </div>
-    <div class="field">
-      <label>Text Color</label>
-      <div class="color-row">
-        <input type="color" id="textColor" value="#f5c842">
-        <input type="text" class="color-hex" id="textColorHex" value="#f5c842" maxlength="7" spellcheck="false">
+      <div class="field">
+        <label>Text Color</label>
+        <div class="color-row">
+          <input type="color" id="textColor" value="#f5c842">
+          <input type="text" class="color-hex" id="textColorHex" value="#f5c842" maxlength="7" spellcheck="false">
+        </div>
       </div>
     </div>
   </div>
@@ -258,13 +262,11 @@ input[type="color"] {
 
   <div class="section">
     <div class="section-title">Export</div>
-    <div class="btn-row">
-      <button class="btn btn-primary" id="btnSTL">⬇ Download STL</button>
-      <button class="btn btn-secondary" id="btnGLB">⬇ Download GLB</button>
-      <button class="btn btn-secondary" id="btn3MF">⬇ Download 3MF</button>
-      <button class="btn btn-secondary" id="btn3MFMulti">⬇ Multi-Color 3MF</button>
+    <div class="row2">
+      <button class="btn btn-primary" id="btnSTL">⬇ STL</button>
+      <button class="btn btn-secondary" id="btn3MFMulti">⬇ 3MF</button>
     </div>
-    <p class="hint">STL / 3MF — ideal for 3D printing.<br>GLB — preserves plate &amp; text colors.<br>Multi-Color 3MF — plate and text as separate parts for multi-filament printers.</p>
+    <p class="hint">STL &amp; 3MF — ideal for 3D printing. 3MF includes plate and text as separate parts for multi-filament printers.</p>
   </div>
 
   <div class="divider"></div>
@@ -290,7 +292,6 @@ import { OrbitControls }       from 'three/addons/controls/OrbitControls.js';
 import { FontLoader }          from 'three/addons/loaders/FontLoader.js';
 import { TextGeometry }        from 'three/addons/geometries/TextGeometry.js';
 import { STLExporter }         from 'three/addons/exporters/STLExporter.js';
-import { GLTFExporter }        from 'three/addons/exporters/GLTFExporter.js';
 import { mergeGeometries }     from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ── Font catalogue ────────────────────────────────────────────────────────────
@@ -633,23 +634,6 @@ document.getElementById('btnSTL').addEventListener('click', () => {
   exportGeo.dispose();
 });
 
-// ── GLB export ────────────────────────────────────────────────────────────────
-document.getElementById('btnGLB').addEventListener('click', async () => {
-  if (!plateMesh) return;
-  const tmpScene = new THREE.Scene();
-  tmpScene.add(plateMesh.clone());
-  if (textMesh) tmpScene.add(textMesh.clone());
-
-  try {
-    const result = await new Promise((resolve, reject) =>
-      new GLTFExporter().parse(tmpScene, resolve, reject, { binary: true })
-    );
-    triggerDownload(new Blob([result], { type: 'application/octet-stream' }), 'label.glb');
-  } catch (e) {
-    console.error('GLB export error:', e);
-    alert('GLB export failed: ' + e.message);
-  }
-});
 
 // ── 3MF export ────────────────────────────────────────────────────────────────
 // Minimal ZIP (STORE, no compression) — avoids external dependency.
@@ -860,11 +844,6 @@ function _make3mfBlob(p, multicolor) {
 
   return new Blob([zip], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+zip' });
 }
-
-document.getElementById('btn3MF').addEventListener('click', () => {
-  const blob = _make3mfBlob(readParams(), false);
-  if (blob) triggerDownload(blob, 'label.3mf');
-});
 
 document.getElementById('btn3MFMulti').addEventListener('click', () => {
   const blob = _make3mfBlob(readParams(), true);
