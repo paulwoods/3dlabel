@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Label Designer</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
+  }
+}
+</script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; }
+body { display: flex; background: #0d0d1a; color: #e0e0f0; }
+
+#sidebar {
+  width: 300px;
+  min-width: 300px;
+  height: 100vh;
+  background: #13132a;
+  border-right: 1px solid #252545;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+#sidebar::-webkit-scrollbar { width: 5px; }
+#sidebar::-webkit-scrollbar-track { background: #13132a; }
+#sidebar::-webkit-scrollbar-thumb { background: #3a3a6a; border-radius: 3px; }
+
+#canvas-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+#canvas-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+h1 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #8080ff;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #252545;
+}
+
+.section { display: flex; flex-direction: column; gap: 8px; }
+
+.section-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #5555a0;
+  margin-bottom: 2px;
+}
+
+.field { display: flex; flex-direction: column; gap: 3px; }
+
+label {
+  font-size: 0.78rem;
+  color: #9090c0;
+}
+
+input[type="number"],
+input[type="text"],
+select {
+  background: #1a1a35;
+  border: 1px solid #333365;
+  border-radius: 6px;
+  color: #e0e0f0;
+  padding: 7px 10px;
+  font-size: 0.83rem;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+input[type="number"]:focus,
+input[type="text"]:focus,
+select:focus { border-color: #6666ff; }
+select option { background: #1a1a35; }
+
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+input[type="color"] {
+  width: 38px;
+  height: 34px;
+  border: 1px solid #333365;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  padding: 2px;
+  flex-shrink: 0;
+}
+.color-hex {
+  flex: 1;
+  background: #1a1a35;
+  border: 1px solid #333365;
+  border-radius: 6px;
+  color: #e0e0f0;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+  font-family: 'Consolas', monospace;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.color-hex:focus { border-color: #6666ff; }
+
+.btn {
+  padding: 10px 14px;
+  border-radius: 7px;
+  border: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.04em;
+  width: 100%;
+}
+.btn-primary { background: #4444cc; color: #fff; }
+.btn-primary:hover { background: #5555ee; transform: translateY(-1px); }
+.btn-secondary { background: #1e1e3e; color: #8888cc; border: 1px solid #3a3a6a; }
+.btn-secondary:hover { background: #2a2a52; transform: translateY(-1px); }
+.btn-row { display: flex; flex-direction: column; gap: 7px; }
+
+.hint { font-size: 0.7rem; color: #444470; line-height: 1.5; }
+
+#loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 13, 26, 0.94);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  gap: 14px;
+}
+.spinner {
+  width: 38px; height: 38px;
+  border: 3px solid #2a2a4a;
+  border-top-color: #6666ff;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { color: #5555a0; font-size: 0.82rem; }
+
+#info-bar {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(19, 19, 42, 0.75);
+  border: 1px solid #252545;
+  border-radius: 20px;
+  padding: 5px 16px;
+  font-size: 0.72rem;
+  color: #404060;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.divider {
+  height: 1px;
+  background: #1e1e3e;
+  margin: 2px 0;
+}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>3D Label Designer</h1>
+
+  <div class="section">
+    <div class="section-title">Dimensions</div>
+    <div class="row2">
+      <div class="field">
+        <label for="length">Length (mm)</label>
+        <input type="number" id="length" value="100" min="1" max="500" step="1">
+      </div>
+      <div class="field">
+        <label for="width">Width (mm)</label>
+        <input type="number" id="width" value="50" min="1" max="500" step="1">
+      </div>
+    </div>
+    <div class="field">
+      <label for="thickness">Thickness (mm)</label>
+      <input type="number" id="thickness" value="5" min="0.5" max="50" step="0.5">
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="section">
+    <div class="section-title">Text</div>
+    <div class="field">
+      <label for="text">Label Text</label>
+      <input type="text" id="text" value="Hello World" placeholder="Enter text…">
+    </div>
+    <div class="field">
+      <label for="font">Font Style</label>
+      <select id="font"></select>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label for="fontSize">Size (mm)</label>
+        <input type="number" id="fontSize" value="8" min="1" max="100" step="0.5">
+      </div>
+      <div class="field">
+        <label for="raise">Raise (mm)</label>
+        <input type="number" id="raise" value="1.5" min="0.1" max="20" step="0.1">
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="section">
+    <div class="section-title">Colors</div>
+    <div class="field">
+      <label>Plate Color</label>
+      <div class="color-row">
+        <input type="color" id="plateColor" value="#2255aa">
+        <input type="text" class="color-hex" id="plateColorHex" value="#2255aa" maxlength="7" spellcheck="false">
+      </div>
+    </div>
+    <div class="field">
+      <label>Text Color</label>
+      <div class="color-row">
+        <input type="color" id="textColor" value="#f5c842">
+        <input type="text" class="color-hex" id="textColorHex" value="#f5c842" maxlength="7" spellcheck="false">
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="section">
+    <div class="section-title">Export</div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btnSTL">⬇ Download STL</button>
+      <button class="btn btn-secondary" id="btnGLB">⬇ Download GLB</button>
+    </div>
+    <p class="hint">STL — ideal for 3D printing (single color).<br>GLB — preserves plate &amp; text colors.</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="section">
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="btnResetCamera">⟳ Reset Camera</button>
+    </div>
+  </div>
+</div>
+
+<div id="canvas-container">
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Loading fonts…</div>
+  </div>
+  <div id="info-bar">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls }       from 'three/addons/controls/OrbitControls.js';
+import { FontLoader }          from 'three/addons/loaders/FontLoader.js';
+import { TextGeometry }        from 'three/addons/geometries/TextGeometry.js';
+import { STLExporter }         from 'three/addons/exporters/STLExporter.js';
+import { GLTFExporter }        from 'three/addons/exporters/GLTFExporter.js';
+import { mergeGeometries }     from 'three/addons/utils/BufferGeometryUtils.js';
+
+// ── Font catalogue ────────────────────────────────────────────────────────────
+const FONT_BASE = 'https://cdn.jsdelivr.net/npm/three@0.184.0/examples/fonts/';
+const FONT_DEFS = [
+  { label: 'Helvetiker Regular',   url: FONT_BASE + 'helvetiker_regular.typeface.json' },
+  { label: 'Helvetiker Bold',      url: FONT_BASE + 'helvetiker_bold.typeface.json' },
+  { label: 'Optimer Regular',      url: FONT_BASE + 'optimer_regular.typeface.json' },
+  { label: 'Optimer Bold',         url: FONT_BASE + 'optimer_bold.typeface.json' },
+  { label: 'Gentilis Regular',     url: FONT_BASE + 'gentilis_regular.typeface.json' },
+  { label: 'Gentilis Bold',        url: FONT_BASE + 'gentilis_bold.typeface.json' },
+  { label: 'Droid Sans Regular',   url: FONT_BASE + 'droid/droid_sans_regular.typeface.json' },
+  { label: 'Droid Sans Bold',      url: FONT_BASE + 'droid/droid_sans_bold.typeface.json' },
+  { label: 'Droid Serif Regular',  url: FONT_BASE + 'droid/droid_serif_regular.typeface.json' },
+  { label: 'Droid Serif Bold',     url: FONT_BASE + 'droid/droid_serif_bold.typeface.json' },
+  { label: 'Droid Sans Mono',      url: FONT_BASE + 'droid/droid_sans_mono_regular.typeface.json' },
+];
+const loadedFonts = new Map();
+
+// ── Renderer / Scene / Camera ─────────────────────────────────────────────────
+const container = document.getElementById('canvas-container');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d0d1a);
+scene.fog = new THREE.FogExp2(0x0d0d1a, 0.002);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.minDistance = 5;
+controls.maxDistance = 3000;
+
+// Lights
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+
+const sunLight = new THREE.DirectionalLight(0xfff8e7, 1.4);
+sunLight.position.set(100, 200, 150);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.camera.near = 1;
+sunLight.shadow.camera.far = 1000;
+sunLight.shadow.camera.left = sunLight.shadow.camera.bottom = -300;
+sunLight.shadow.camera.right = sunLight.shadow.camera.top = 300;
+scene.add(sunLight);
+
+const rimLight = new THREE.DirectionalLight(0x6666ff, 0.35);
+rimLight.position.set(-150, 80, -200);
+scene.add(rimLight);
+
+// Floor grid
+const grid = new THREE.GridHelper(800, 32, 0x1e1e3e, 0x191930);
+grid.position.y = -40;
+grid.material.transparent = true;
+grid.material.opacity = 0.6;
+scene.add(grid);
+
+// Resize
+const resizeObs = new ResizeObserver(() => {
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+});
+resizeObs.observe(container);
+
+// Render loop
+renderer.setAnimationLoop(() => {
+  controls.update();
+  renderer.render(scene, camera);
+});
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let plateMesh = null;
+let textMesh  = null;
+let rebuildTimer = null;
+
+// ── Parameter reader ──────────────────────────────────────────────────────────
+function readParams() {
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  return {
+    length:     clamp(parseFloat(document.getElementById('length').value)    || 100, 1,  500),
+    width:      clamp(parseFloat(document.getElementById('width').value)     || 50,  1,  500),
+    thickness:  clamp(parseFloat(document.getElementById('thickness').value) || 5,   0.5, 50),
+    text:       document.getElementById('text').value,
+    fontUrl:    document.getElementById('font').value,
+    fontSize:   clamp(parseFloat(document.getElementById('fontSize').value)  || 8,  1, 100),
+    raise:      clamp(parseFloat(document.getElementById('raise').value)     || 1.5, 0.1, 20),
+    plateColor: document.getElementById('plateColor').value,
+    textColor:  document.getElementById('textColor').value,
+  };
+}
+
+// ── Text geometry (used by both preview and export) ───────────────────────────
+// Returns a positioned, non-indexed BufferGeometry ready for merging/rendering.
+//
+// Coordinate logic:
+//   TextGeometry is raw in XY plane, extruded +Z.
+//   Rx(-PI/2) transforms: (x,y,z) → (x, z, -y)
+//     • old Z (extrusion) → new +Y  (raised text faces up)
+//     • old Y (glyph height) → new -Z  (glyph depth on plate, in -Z half)
+//   Translation then centers X/Z and lifts onto plate top face.
+function buildTextGeometry(text, font, fontSize, raise, thickness, highDetail) {
+  const geo = new TextGeometry(text, {
+    font,
+    size:          fontSize,
+    depth:         raise,
+    curveSegments: highDetail ? 12 : 5,
+    bevelEnabled:  false,
+  });
+
+  geo.computeBoundingBox();
+  const bb   = geo.boundingBox;
+  const tw   = bb.max.x - bb.min.x;
+  const tyMid = (bb.min.y + bb.max.y) / 2;  // pre-rotation Y centre → post-rotation -Z centre
+
+  geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+
+  geo.applyMatrix4(new THREE.Matrix4().makeTranslation(
+    -(bb.min.x + tw / 2),  // centre on X
+    thickness / 2,         // sit on plate top face
+    tyMid                  // centre on Z (cancels the -Y offset from rotation)
+  ));
+
+  return geo;
+}
+
+// ── Scene rebuild ─────────────────────────────────────────────────────────────
+function rebuildScene() {
+  const p = readParams();
+
+  if (plateMesh) { scene.remove(plateMesh); plateMesh.geometry.dispose(); plateMesh.material.dispose(); plateMesh = null; }
+  if (textMesh)  { scene.remove(textMesh);  textMesh.geometry.dispose();  textMesh.material.dispose();  textMesh  = null; }
+
+  // Plate
+  plateMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(p.length, p.thickness, p.width),
+    new THREE.MeshStandardMaterial({ color: p.plateColor, roughness: 0.45, metalness: 0.15 })
+  );
+  plateMesh.castShadow = plateMesh.receiveShadow = true;
+  scene.add(plateMesh);
+
+  // Text
+  if (p.text.trim().length > 0) {
+    const font = loadedFonts.get(p.fontUrl);
+    if (!font) return;
+
+    const tg = buildTextGeometry(p.text, font, p.fontSize, p.raise, p.thickness, false);
+    textMesh = new THREE.Mesh(
+      tg,
+      new THREE.MeshStandardMaterial({ color: p.textColor, roughness: 0.3, metalness: 0.1 })
+    );
+    textMesh.castShadow = true;
+    scene.add(textMesh);
+  }
+}
+
+// ── Camera fit ────────────────────────────────────────────────────────────────
+function fitCamera() {
+  const p = readParams();
+  const halfL = p.length / 2;
+  const halfW = p.width  / 2;
+  const halfT = (p.thickness + p.raise) / 2;
+  const sphere = new THREE.Box3(
+    new THREE.Vector3(-halfL, -halfT, -halfW),
+    new THREE.Vector3( halfL,  halfT,  halfW)
+  ).getBoundingSphere(new THREE.Sphere());
+  const fovRad = camera.fov * Math.PI / 180;
+  const dist   = (sphere.radius / Math.sin(fovRad / 2)) * 1.6;
+  camera.position.set(dist * 0.45, dist * 0.5, dist);
+  controls.target.copy(sphere.center);
+  camera.near = dist * 0.001;
+  camera.far  = dist * 20;
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+// ── Debounced rebuild wiring ──────────────────────────────────────────────────
+function scheduleRebuild() {
+  clearTimeout(rebuildTimer);
+  rebuildTimer = setTimeout(rebuildScene, 80);
+}
+
+['length','width','thickness','text','fontSize','raise'].forEach(id =>
+  document.getElementById(id).addEventListener('input', scheduleRebuild)
+);
+document.getElementById('font').addEventListener('change', scheduleRebuild);
+
+// Sync colour pickers ↔ hex text fields
+function syncColor(pickerId, hexId) {
+  document.getElementById(pickerId).addEventListener('input', e => {
+    document.getElementById(hexId).value = e.target.value;
+    scheduleRebuild();
+  });
+  document.getElementById(hexId).addEventListener('input', e => {
+    if (/^#[0-9a-f]{6}$/i.test(e.target.value)) {
+      document.getElementById(pickerId).value = e.target.value;
+      scheduleRebuild();
+    }
+  });
+}
+syncColor('plateColor', 'plateColorHex');
+syncColor('textColor',  'textColorHex');
+
+document.getElementById('btnResetCamera').addEventListener('click', fitCamera);
+
+// ── Download helper ───────────────────────────────────────────────────────────
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// ── STL export ────────────────────────────────────────────────────────────────
+document.getElementById('btnSTL').addEventListener('click', () => {
+  const p = readParams();
+
+  // Both inputs must be non-indexed for mergeGeometries
+  const plateNI = new THREE.BoxGeometry(p.length, p.thickness, p.width).toNonIndexed();
+
+  let exportGeo;
+  if (p.text.trim().length > 0) {
+    const font = loadedFonts.get(p.fontUrl);
+    if (!font) { alert('Fonts still loading — please try again in a moment.'); return; }
+
+    const textGeo  = buildTextGeometry(p.text, font, p.fontSize, p.raise, p.thickness, true);
+    // TextGeometry is non-indexed; guard anyway
+    const textNI   = textGeo.index ? textGeo.toNonIndexed() : textGeo;
+    exportGeo = mergeGeometries([plateNI, textNI]);
+    if (!exportGeo) { console.error('mergeGeometries returned null'); alert('Export failed.'); return; }
+    textGeo.dispose();
+    plateNI.dispose();
+  } else {
+    exportGeo = plateNI;
+  }
+
+  const tmpScene = new THREE.Scene();
+  tmpScene.add(new THREE.Mesh(exportGeo, new THREE.MeshStandardMaterial()));
+  tmpScene.updateMatrixWorld(true);
+
+  const stl = new STLExporter().parse(tmpScene, { binary: true });
+  triggerDownload(new Blob([stl], { type: 'application/octet-stream' }), 'label.stl');
+  exportGeo.dispose();
+});
+
+// ── GLB export ────────────────────────────────────────────────────────────────
+document.getElementById('btnGLB').addEventListener('click', async () => {
+  if (!plateMesh) return;
+  const tmpScene = new THREE.Scene();
+  tmpScene.add(plateMesh.clone());
+  if (textMesh) tmpScene.add(textMesh.clone());
+
+  try {
+    const result = await new Promise((resolve, reject) =>
+      new GLTFExporter().parse(tmpScene, resolve, reject, { binary: true })
+    );
+    triggerDownload(new Blob([result], { type: 'application/octet-stream' }), 'label.glb');
+  } catch (e) {
+    console.error('GLB export error:', e);
+    alert('GLB export failed: ' + e.message);
+  }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  // Populate font dropdown
+  const sel = document.getElementById('font');
+  FONT_DEFS.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.url;
+    opt.textContent = f.label;
+    sel.appendChild(opt);
+  });
+
+  // Load all fonts in parallel
+  const loader = new FontLoader();
+  const loadingEl = document.querySelector('.loading-text');
+  let done = 0;
+
+  await Promise.all(FONT_DEFS.map(f =>
+    loader.loadAsync(f.url).then(font => {
+      loadedFonts.set(f.url, font);
+      done++;
+      loadingEl.textContent = `Loading fonts (${done}/${FONT_DEFS.length})…`;
+    })
+  ));
+
+  document.getElementById('loading-overlay').style.display = 'none';
+
+  rebuildScene();
+  fitCamera();
+}
+
+init();
+</script>
+</body>
+</html>
