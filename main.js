@@ -86,19 +86,28 @@ renderer.setAnimationLoop(() => {
 });
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let plateMesh = null;
-let textMesh  = null;
+let labelMeshes = [];
 let rebuildTimer = null;
 
 // ── Parameter reader ──────────────────────────────────────────────────────────
 function readParams() {
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const mode = document.querySelector('input[name="mode"]:checked').value;
+  let texts;
+  if (mode === 'multiple') {
+    texts = document.getElementById('textMulti').value
+      .split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (texts.length === 0) texts = [''];
+  } else {
+    texts = [document.getElementById('text').value];
+  }
   return {
     length:     clamp(parseFloat(document.getElementById('length').value)    || 100, 1,  500),
     width:      clamp(parseFloat(document.getElementById('width').value)     || 50,  1,  500),
     thickness:  clamp(parseFloat(document.getElementById('thickness').value) || 5,   0.5, 50),
     radius:     clamp(parseFloat(document.getElementById('radius').value)    || 5,   0,   100),
-    text:       document.getElementById('text').value,
+    texts,
+    mode,
     fontUrl:    document.getElementById('font').value,
     fontSize:   clamp(parseFloat(document.getElementById('fontSize').value)  || 8,  1, 100),
     raise:      clamp(parseFloat(document.getElementById('raise').value)     || 1.5, 0.1, 20),
@@ -184,40 +193,52 @@ function buildTextGeometry(text, font, fontSize, raise, thickness, highDetail) {
   return geo;
 }
 
+const LABEL_GAP = 5;
+
 // ── Scene rebuild ─────────────────────────────────────────────────────────────
 function rebuildScene() {
   const p = readParams();
 
-  if (plateMesh) { scene.remove(plateMesh); plateMesh.geometry.dispose(); plateMesh.material.dispose(); plateMesh = null; }
-  if (textMesh)  { scene.remove(textMesh);  textMesh.geometry.dispose();  textMesh.material.dispose();  textMesh  = null; }
-
-  // Plate
-  plateMesh = new THREE.Mesh(
-    createPlateGeometry(p.length, p.width, p.thickness, p.radius, false),
-    new THREE.MeshStandardMaterial({ color: p.plateColor, roughness: 0.45, metalness: 0.15 })
-  );
-  plateMesh.castShadow = plateMesh.receiveShadow = true;
-  scene.add(plateMesh);
-
-  // Text
-  if (p.text.trim().length > 0) {
-    const font = loadedFonts.get(p.fontUrl);
-    if (!font) return;
-
-    const tg = buildTextGeometry(p.text, font, p.fontSize, p.raise, p.thickness, false);
-    textMesh = new THREE.Mesh(
-      tg,
-      new THREE.MeshStandardMaterial({ color: p.textColor, roughness: 0.3, metalness: 0.1 })
-    );
-    textMesh.castShadow = true;
-    scene.add(textMesh);
+  for (const { plate, text } of labelMeshes) {
+    scene.remove(plate); plate.geometry.dispose(); plate.material.dispose();
+    if (text) { scene.remove(text); text.geometry.dispose(); text.material.dispose(); }
   }
+  labelMeshes = [];
+
+  const n = p.texts.length;
+  const totalLength = n * p.length + (n - 1) * LABEL_GAP;
+  const font = loadedFonts.get(p.fontUrl);
+
+  p.texts.forEach((txt, i) => {
+    const xOffset = -totalLength / 2 + i * (p.length + LABEL_GAP) + p.length / 2;
+
+    const plate = new THREE.Mesh(
+      createPlateGeometry(p.length, p.width, p.thickness, p.radius, false),
+      new THREE.MeshStandardMaterial({ color: p.plateColor, roughness: 0.45, metalness: 0.15 })
+    );
+    plate.position.x = xOffset;
+    plate.castShadow = plate.receiveShadow = true;
+    scene.add(plate);
+
+    let textObj = null;
+    if (txt.trim().length > 0 && font) {
+      const tg = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, false);
+      textObj = new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ color: p.textColor, roughness: 0.3, metalness: 0.1 }));
+      textObj.position.x = xOffset;
+      textObj.castShadow = true;
+      scene.add(textObj);
+    }
+
+    labelMeshes.push({ plate, text: textObj });
+  });
 }
 
 // ── Camera fit ────────────────────────────────────────────────────────────────
 function fitCamera() {
   const p = readParams();
-  const halfL = p.length / 2;
+  const n = p.texts.length;
+  const totalLength = n * p.length + (n - 1) * LABEL_GAP;
+  const halfL = totalLength / 2;
   const halfW = p.width  / 2;
   const halfT = (p.thickness + p.raise) / 2;
   const sphere = new THREE.Box3(
@@ -242,11 +263,12 @@ function scheduleRebuild() {
 
 // ── LocalStorage persistence ──────────────────────────────────────────────────
 const STORAGE_KEY = '3dlabel_v1';
-const PERSISTED_IDS = ['length','width','thickness','radius','text','font','fontSize','raise','plateColor','textColor'];
+const PERSISTED_IDS = ['length','width','thickness','radius','text','font','fontSize','raise','plateColor','textColor','textMulti'];
 
 function saveToStorage() {
   const data = {};
   PERSISTED_IDS.forEach(id => { data[id] = document.getElementById(id).value; });
+  data.mode = document.querySelector('input[name="mode"]:checked').value;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
@@ -258,6 +280,10 @@ function loadFromStorage() {
       const el = document.getElementById(id);
       if (el && data[id] !== undefined) el.value = data[id];
     });
+    if (data.mode) {
+      const radio = document.querySelector(`input[name="mode"][value="${data.mode}"]`);
+      if (radio) { radio.checked = true; applyModeUI(data.mode); }
+    }
     // Keep hex text fields in sync with restored colour picker values.
     document.getElementById('plateColorHex').value = document.getElementById('plateColor').value;
     document.getElementById('textColorHex').value  = document.getElementById('textColor').value;
@@ -268,6 +294,20 @@ function loadFromStorage() {
   document.getElementById(id).addEventListener('input', () => { saveToStorage(); scheduleRebuild(); })
 );
 document.getElementById('font').addEventListener('change', () => { saveToStorage(); scheduleRebuild(); });
+document.getElementById('textMulti').addEventListener('input', () => { saveToStorage(); scheduleRebuild(); });
+
+function applyModeUI(mode) {
+  document.getElementById('fieldTextSingle').style.display   = mode === 'single'   ? '' : 'none';
+  document.getElementById('fieldTextMultiple').style.display = mode === 'multiple' ? '' : 'none';
+}
+
+document.querySelectorAll('input[name="mode"]').forEach(radio =>
+  radio.addEventListener('change', e => {
+    applyModeUI(e.target.value);
+    saveToStorage();
+    scheduleRebuild();
+  })
+);
 
 // Sync colour pickers ↔ hex text fields
 function syncColor(pickerId, hexId) {
@@ -314,25 +354,32 @@ function triggerDownload(blob, filename) {
 // ── STL export ────────────────────────────────────────────────────────────────
 document.getElementById('btnSTL').addEventListener('click', () => {
   const p = readParams();
+  const font = loadedFonts.get(p.fontUrl);
+  if (p.texts.some(t => t.trim()) && !font) { alert('Fonts still loading — please try again in a moment.'); return; }
 
-  // Both inputs must be non-indexed for mergeGeometries
-  const plateNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true).toNonIndexed();
+  const n = p.texts.length;
+  const totalLength = n * p.length + (n - 1) * LABEL_GAP;
+  const geosToMerge = [];
 
-  let exportGeo;
-  if (p.text.trim().length > 0) {
-    const font = loadedFonts.get(p.fontUrl);
-    if (!font) { alert('Fonts still loading — please try again in a moment.'); return; }
+  for (let i = 0; i < n; i++) {
+    const xOffset = -totalLength / 2 + i * (p.length + LABEL_GAP) + p.length / 2;
+    const plateNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true).toNonIndexed();
+    plateNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
+    geosToMerge.push(plateNI);
 
-    const textGeo  = buildTextGeometry(p.text, font, p.fontSize, p.raise, p.thickness, true);
-    // TextGeometry is non-indexed; guard anyway
-    const textNI   = textGeo.index ? textGeo.toNonIndexed() : textGeo;
-    exportGeo = mergeGeometries([plateNI, textNI]);
-    if (!exportGeo) { console.error('mergeGeometries returned null'); alert('Export failed.'); return; }
-    textGeo.dispose();
-    plateNI.dispose();
-  } else {
-    exportGeo = plateNI;
+    const txt = p.texts[i];
+    if (txt.trim().length > 0 && font) {
+      const textGeo = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, true);
+      const textNI  = textGeo.index ? textGeo.toNonIndexed() : textGeo;
+      textNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
+      geosToMerge.push(textNI);
+      if (textGeo !== textNI) textGeo.dispose();
+    }
   }
+
+  const exportGeo = mergeGeometries(geosToMerge);
+  geosToMerge.forEach(g => g.dispose());
+  if (!exportGeo) { console.error('mergeGeometries returned null'); alert('Export failed.'); return; }
 
   applyPrintTransform(exportGeo, p.thickness);
 
@@ -472,52 +519,57 @@ function _buildMeshXML(geometry, objectId) {
 // multicolor=false → plate + text merged as one component (single-filament).
 // multicolor=true  → plate and text as separate build items (multi-filament).
 function _make3mfBlob(p, multicolor) {
-  const plateGeoNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true).toNonIndexed();
+  const font = loadedFonts.get(p.fontUrl);
+  if (p.texts.some(t => t.trim()) && !font) { alert('Fonts still loading — please try again in a moment.'); return null; }
 
-  let textGeoNI = null;
-  const hasText = p.text.trim().length > 0;
-  if (hasText) {
-    const font = loadedFonts.get(p.fontUrl);
-    if (!font) { alert('Fonts still loading — please try again in a moment.'); return null; }
-    const tg = buildTextGeometry(p.text, font, p.fontSize, p.raise, p.thickness, true);
-    textGeoNI = tg.index ? tg.toNonIndexed() : tg;
-  }
-
-  applyPrintTransform(plateGeoNI, p.thickness);
-  if (textGeoNI) applyPrintTransform(textGeoNI, p.thickness);
-
+  const n = p.texts.length;
+  const totalLength = n * p.length + (n - 1) * LABEL_GAP;
   const matNS = 'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"';
-
-  // Always embed colors via the materials extension.
   const colorGroups = `
   <m:colorgroup id="10"><m:color color="${p.plateColor}"/></m:colorgroup>
   <m:colorgroup id="11"><m:color color="${p.textColor}"/></m:colorgroup>`;
 
-  const plateMeshXML = _buildMeshXML(plateGeoNI, 1)
-    .replace('<object id="1"', '<object id="1" m:colorid="10"');
-  const textMeshXML = hasText
-    ? _buildMeshXML(textGeoNI, 2).replace('<object id="2"', '<object id="2" m:colorid="11"')
-    : '';
-
-  let resourcesExtra = '';
+  let meshObjectsXML = '';
+  let componentObjectsXML = '';
   let buildItems = '';
+  let nextId = 1;
+  const disposables = [];
 
-  if (multicolor) {
-    // Two separate build items — each gets its own filament in the slicer.
-    buildItems = hasText
-      ? '<item objectid="1"/><item objectid="2"/>'
-      : '<item objectid="1"/>';
-  } else {
-    // Single component wrapping both — one printable body.
-    if (hasText) {
-      resourcesExtra = `
-  <object id="3" type="model"><components>
-    <component objectid="1"/>
-    <component objectid="2"/>
-  </components></object>`;
-      buildItems = '<item objectid="3"/>';
+  for (let i = 0; i < n; i++) {
+    const xOffset = -totalLength / 2 + i * (p.length + LABEL_GAP) + p.length / 2;
+    const txt = p.texts[i];
+
+    const plateGeoNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true).toNonIndexed();
+    plateGeoNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
+    applyPrintTransform(plateGeoNI, p.thickness);
+    disposables.push(plateGeoNI);
+
+    const plateId = nextId++;
+    meshObjectsXML += _buildMeshXML(plateGeoNI, plateId)
+      .replace(`<object id="${plateId}"`, `<object id="${plateId}" m:colorid="10"`);
+
+    const hasText = txt.trim().length > 0;
+    let textId = null;
+    if (hasText && font) {
+      const tg = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, true);
+      const textGeoNI = tg.index ? tg.toNonIndexed() : tg;
+      textGeoNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
+      applyPrintTransform(textGeoNI, p.thickness);
+      disposables.push(textGeoNI);
+      textId = nextId++;
+      meshObjectsXML += _buildMeshXML(textGeoNI, textId)
+        .replace(`<object id="${textId}"`, `<object id="${textId}" m:colorid="11"`);
+    }
+
+    if (multicolor) {
+      buildItems += `<item objectid="${plateId}"/>`;
+      if (textId !== null) buildItems += `<item objectid="${textId}"/>`;
+    } else if (textId !== null) {
+      const compId = nextId++;
+      componentObjectsXML += `<object id="${compId}" type="model"><components><component objectid="${plateId}"/><component objectid="${textId}"/></components></object>`;
+      buildItems += `<item objectid="${compId}"/>`;
     } else {
-      buildItems = '<item objectid="1"/>';
+      buildItems += `<item objectid="${plateId}"/>`;
     }
   }
 
@@ -527,9 +579,8 @@ function _make3mfBlob(p, multicolor) {
   ${matNS}>
 <resources>
   ${colorGroups}
-  ${plateMeshXML}
-  ${textMeshXML}
-  ${resourcesExtra}
+  ${meshObjectsXML}
+  ${componentObjectsXML}
 </resources>
 <build>${buildItems}</build>
 </model>`;
@@ -549,9 +600,7 @@ function _make3mfBlob(p, multicolor) {
     { name: '3D/3dmodel.model', data: enc.encode(modelXML) },
   ]);
 
-  plateGeoNI.dispose();
-  if (textGeoNI) textGeoNI.dispose();
-
+  disposables.forEach(g => g.dispose());
   return new Blob([zip], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+zip' });
 }
 

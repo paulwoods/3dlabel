@@ -161,6 +161,38 @@ input[type="color"] {
   white-space: nowrap;
 }
 
+.radio-group {
+  display: flex;
+  gap: 16px;
+}
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.83rem;
+  color: #e0e0f0;
+  cursor: pointer;
+}
+input[type="radio"] {
+  accent-color: #6666ff;
+  cursor: pointer;
+}
+textarea {
+  background: #1a1a35;
+  border: 1px solid #333365;
+  border-radius: 6px;
+  color: #e0e0f0;
+  padding: 7px 10px;
+  font-size: 0.83rem;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+  resize: vertical;
+  min-height: 80px;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+textarea:focus { border-color: #6666ff; }
+
 .divider {
   height: 1px;
   background: #1e1e3e;

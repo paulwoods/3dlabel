@@ -46,10 +46,30 @@
   <div class="divider"></div>
 
   <div class="section">
+    <div class="section-title">Mode</div>
+    <div class="radio-group">
+      <label class="radio-label">
+        <input type="radio" name="mode" id="modeSingle" value="single" checked>
+        Single
+      </label>
+      <label class="radio-label">
+        <input type="radio" name="mode" id="modeMultiple" value="multiple">
+        Multiple
+      </label>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="section">
     <div class="section-title">Text</div>
-    <div class="field">
+    <div class="field" id="fieldTextSingle">
       <label for="text">Label Text</label>
       <input type="text" id="text" value="Hello World" placeholder="Enter text…">
+    </div>
+    <div class="field" id="fieldTextMultiple" style="display:none">
+      <label for="textMulti">Labels (one per line)</label>
+      <textarea id="textMulti" rows="5" placeholder="Label 1&#10;Label 2&#10;Label 3…"></textarea>
     </div>
     <div class="field">
       <label for="font">Font Style</label>
