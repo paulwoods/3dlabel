@@ -206,17 +206,24 @@ function rebuildScene() {
   labelMeshes = [];
 
   const n = p.texts.length;
-  const totalLength = n * p.length + (n - 1) * LABEL_GAP;
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const totalLength = cols * p.length + (cols - 1) * LABEL_GAP;
+  const totalDepth  = rows * p.width  + (rows - 1) * LABEL_GAP;
   const font = loadedFonts.get(p.fontUrl);
 
   p.texts.forEach((txt, i) => {
-    const xOffset = -totalLength / 2 + i * (p.length + LABEL_GAP) + p.length / 2;
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const xOffset = -totalLength / 2 + col * (p.length + LABEL_GAP) + p.length / 2;
+    const zOffset = -totalDepth  / 2 + row * (p.width  + LABEL_GAP) + p.width  / 2;
 
     const plate = new THREE.Mesh(
       createPlateGeometry(p.length, p.width, p.thickness, p.radius, false),
       new THREE.MeshStandardMaterial({ color: p.plateColor, roughness: 0.45, metalness: 0.15 })
     );
     plate.position.x = xOffset;
+    plate.position.z = zOffset;
     plate.castShadow = plate.receiveShadow = true;
     scene.add(plate);
 
@@ -225,6 +232,7 @@ function rebuildScene() {
       const tg = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, false);
       textObj = new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ color: p.textColor, roughness: 0.3, metalness: 0.1 }));
       textObj.position.x = xOffset;
+      textObj.position.z = zOffset;
       textObj.castShadow = true;
       scene.add(textObj);
     }
@@ -237,13 +245,16 @@ function rebuildScene() {
 function fitCamera() {
   const p = readParams();
   const n = p.texts.length;
-  const totalLength = n * p.length + (n - 1) * LABEL_GAP;
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const totalLength = cols * p.length + (cols - 1) * LABEL_GAP;
+  const totalDepth  = rows * p.width  + (rows - 1) * LABEL_GAP;
   const halfL = totalLength / 2;
-  const halfW = p.width  / 2;
+  const halfD = totalDepth  / 2;
   const halfT = (p.thickness + p.raise) / 2;
   const sphere = new THREE.Box3(
-    new THREE.Vector3(-halfL, -halfT, -halfW),
-    new THREE.Vector3( halfL,  halfT,  halfW)
+    new THREE.Vector3(-halfL, -halfT, -halfD),
+    new THREE.Vector3( halfL,  halfT,  halfD)
   ).getBoundingSphere(new THREE.Sphere());
   const fovRad = camera.fov * Math.PI / 180;
   const dist   = (sphere.radius / Math.sin(fovRad / 2)) * 1.6;
