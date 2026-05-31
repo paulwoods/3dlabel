@@ -407,6 +407,9 @@ function triggerDownload(blob, filename) {
 
 // ── STL export ────────────────────────────────────────────────────────────────
 document.getElementById('btnSTL').addEventListener('click', () => {
+  const name = prompt('Save STL as:', 'label');
+  if (name === null) return;
+  const filename = (name.trim() || 'label').replace(/\.stl$/i, '') + '.stl';
   const p = readParams();
   const font = loadedFonts.get(p.fontUrl);
   if (p.texts.some(t => t.trim()) && !font) { alert('Fonts still loading — please try again in a moment.'); return; }
@@ -442,7 +445,7 @@ document.getElementById('btnSTL').addEventListener('click', () => {
   tmpScene.updateMatrixWorld(true);
 
   const stl = new STLExporter().parse(tmpScene, { binary: true });
-  triggerDownload(new Blob([stl], { type: 'application/octet-stream' }), 'label.stl');
+  triggerDownload(new Blob([stl], { type: 'application/octet-stream' }), filename);
   exportGeo.dispose();
 });
 
@@ -665,8 +668,11 @@ function _make3mfBlob(p, multicolor) {
 }
 
 document.getElementById('btn3MFMulti').addEventListener('click', () => {
+  const name = prompt('Save 3MF as:', 'label_multicolor');
+  if (name === null) return;
+  const filename = (name.trim() || 'label_multicolor').replace(/\.3mf$/i, '') + '.3mf';
   const blob = _make3mfBlob(readParams(), true);
-  if (blob) triggerDownload(blob, 'label_multicolor.3mf');
+  if (blob) triggerDownload(blob, filename);
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
