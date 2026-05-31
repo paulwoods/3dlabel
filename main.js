@@ -340,6 +340,49 @@ syncColor('textColor',  'textColorHex');
 
 document.getElementById('btnResetCamera').addEventListener('click', fitCamera);
 
+// ── Settings file save / load ─────────────────────────────────────────────────
+document.getElementById('btnSaveSettings').addEventListener('click', () => {
+  const name = prompt('Save settings as:', '3dlabel-settings');
+  if (name === null) return;
+  const filename = (name.trim() || '3dlabel-settings').replace(/\.json$/i, '') + '.json';
+  const data = {};
+  PERSISTED_IDS.forEach(id => { data[id] = document.getElementById(id).value; });
+  data.mode = document.querySelector('input[name="mode"]:checked').value;
+  triggerDownload(
+    new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
+    filename
+  );
+});
+
+document.getElementById('btnLoadSettings').addEventListener('click', () => {
+  document.getElementById('fileInput').click();
+});
+
+document.getElementById('fileInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      PERSISTED_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el && data[id] !== undefined) el.value = data[id];
+      });
+      if (data.mode) {
+        const radio = document.querySelector(`input[name="mode"][value="${data.mode}"]`);
+        if (radio) { radio.checked = true; applyModeUI(data.mode); }
+      }
+      document.getElementById('plateColorHex').value = document.getElementById('plateColor').value;
+      document.getElementById('textColorHex').value  = document.getElementById('textColor').value;
+      saveToStorage();
+      scheduleRebuild();
+    } catch (_) { alert('Invalid settings file.'); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
 // ── Print-orientation transform ───────────────────────────────────────────────
 // Three.js is Y-up; slicers (Bambu Studio, PrusaSlicer) are Z-up.
 // Without correction the model exports sideways and slicers lay the wrong face
