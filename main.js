@@ -534,11 +534,14 @@ function _make3mfBlob(p, multicolor) {
   if (p.texts.some(t => t.trim()) && !font) { alert('Fonts still loading — please try again in a moment.'); return null; }
 
   const n = p.texts.length;
-  const totalLength = n * p.length + (n - 1) * LABEL_GAP;
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const totalLength = cols * p.length + (cols - 1) * LABEL_GAP;
+  const totalDepth  = rows * p.width  + (rows - 1) * LABEL_GAP;
   const matNS = 'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"';
   const colorGroups = `
-  <m:colorgroup id="10"><m:color color="${p.plateColor}"/></m:colorgroup>
-  <m:colorgroup id="11"><m:color color="${p.textColor}"/></m:colorgroup>`;
+  <m:colorgroup id="1"><m:color color="${p.plateColor}"/></m:colorgroup>
+  <m:colorgroup id="2"><m:color color="${p.textColor}"/></m:colorgroup>`;
 
   let meshObjectsXML = '';
   let componentObjectsXML = '';
@@ -547,29 +550,32 @@ function _make3mfBlob(p, multicolor) {
   const disposables = [];
 
   for (let i = 0; i < n; i++) {
-    const xOffset = -totalLength / 2 + i * (p.length + LABEL_GAP) + p.length / 2;
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const xOffset = -totalLength / 2 + col * (p.length + LABEL_GAP) + p.length / 2;
+    const zOffset = -totalDepth  / 2 + row * (p.width  + LABEL_GAP) + p.width  / 2;
     const txt = p.texts[i];
 
     const plateGeoNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true).toNonIndexed();
-    plateGeoNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
+    plateGeoNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, zOffset));
     applyPrintTransform(plateGeoNI, p.thickness);
     disposables.push(plateGeoNI);
 
     const plateId = nextId++;
     meshObjectsXML += _buildMeshXML(plateGeoNI, plateId)
-      .replace(`<object id="${plateId}"`, `<object id="${plateId}" m:colorid="10"`);
+      .replace(`<object id="${plateId}"`, `<object id="${plateId}" m:colorid="1"`);
 
     const hasText = txt.trim().length > 0;
     let textId = null;
     if (hasText && font) {
       const tg = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, true);
       const textGeoNI = tg.index ? tg.toNonIndexed() : tg;
-      textGeoNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
+      textGeoNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, zOffset));
       applyPrintTransform(textGeoNI, p.thickness);
       disposables.push(textGeoNI);
       textId = nextId++;
       meshObjectsXML += _buildMeshXML(textGeoNI, textId)
-        .replace(`<object id="${textId}"`, `<object id="${textId}" m:colorid="11"`);
+        .replace(`<object id="${textId}"`, `<object id="${textId}" m:colorid="2"`);
     }
 
     if (multicolor) {
