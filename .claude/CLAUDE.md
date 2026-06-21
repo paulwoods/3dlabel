@@ -24,7 +24,7 @@ node --test
 
 ## Architecture
 
-> **Why it's shaped this way:** the load-bearing decisions below (no build step, pure injected-ops cores, single sources of truth for placement and settings, the baked print transform, the hand-rolled 3MF) are recorded as ADRs in [`docs/adr/`](../docs/adr/). This section describes *what* the architecture is; the ADRs record *why* and *what was traded away* — read them before reversing one of these decisions.
+> **Why it's shaped this way:** the load-bearing decisions below (no build step, pure injected-ops cores, single sources of truth for placement and settings, the baked print transform, the hand-rolled 3MF) are recorded as ADRs in [`docs/adr/`](../docs/adr/README.md). This section describes *what* the architecture is; the ADRs record *why* and *what was traded away* — read them before reversing one of these decisions.
 
 The project is six files: `index.html` (markup + importmap), `style.css` (all styles), `main.js` (all browser logic), and three pure, dependency-free cores — `layout.js` (label placement), `label-model.js` (export-ready geometry orchestration), and `threemf.js` (3MF document + ZIP assembly). Three.js and its add-ons are loaded from CDN via an importmap in `index.html`; there are no local dependencies and no build step. `main.js` imports the cores natively (e.g. `import { layoutLabels } from './layout.js'`). The importmap must stay in `index.html` — browsers process it at parse time before any module scripts run.
 
