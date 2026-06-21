@@ -106,11 +106,14 @@ function readParams() {
     width:      clamp(parseFloat(document.getElementById('width').value)     || 50,  1,  500),
     thickness:  clamp(parseFloat(document.getElementById('thickness').value) || 5,   0.5, 50),
     radius:     clamp(parseFloat(document.getElementById('radius').value)    || 5,   0,   100),
+    plateShape: document.getElementById('plateShape').value,
     texts,
     mode,
     fontUrl:    document.getElementById('font').value,
     fontSize:   clamp(parseFloat(document.getElementById('fontSize').value)  || 8,  1, 100),
     raise:      clamp(parseFloat(document.getElementById('raise').value)     || 1.5, 0.1, 20),
+    lineSpacing: clamp(parseFloat(document.getElementById('lineSpacing').value) || 1.3, 0.8, 3),
+    textStyle:  document.querySelector('input[name="textStyle"]:checked').value,
     plateColor: document.getElementById('plateColor').value,
     textColor:  document.getElementById('textColor').value,
   };
@@ -121,28 +124,38 @@ function readParams() {
 // edges get rounded corners.  Rotation + translation match BoxGeometry's
 // default orientation: plate flat in XZ plane, thickness along Y, centered
 // at origin.
-function createPlateGeometry(length, width, thickness, radius, highDetail) {
-  const r  = Math.max(0, Math.min(radius, length / 2 - 0.01, width / 2 - 0.01));
+function createPlateGeometry(length, width, thickness, radius, highDetail, plateShape = 'roundedRect') {
   const hw = length / 2;
   const hh = width  / 2;
   const shape = new THREE.Shape();
 
-  if (r <= 0) {
-    shape.moveTo(-hw, -hh);
-    shape.lineTo( hw, -hh);
-    shape.lineTo( hw,  hh);
-    shape.lineTo(-hw,  hh);
-    shape.closePath();
+  if (plateShape === 'circle' || plateShape === 'ellipse') {
+    // Circle uses the smaller dimension as its diameter; ellipse uses both axes.
+    const rx = plateShape === 'circle' ? Math.min(hw, hh) : hw;
+    const ry = plateShape === 'circle' ? Math.min(hw, hh) : hh;
+    shape.absellipse(0, 0, rx, ry, 0, Math.PI * 2, false, 0);
   } else {
-    shape.moveTo(-hw + r, -hh);
-    shape.lineTo( hw - r, -hh);
-    shape.absarc( hw - r, -hh + r, r, -Math.PI / 2, 0,           false);
-    shape.lineTo( hw,      hh - r);
-    shape.absarc( hw - r,  hh - r, r, 0,           Math.PI / 2,  false);
-    shape.lineTo(-hw + r,  hh);
-    shape.absarc(-hw + r,  hh - r, r, Math.PI / 2, Math.PI,      false);
-    shape.lineTo(-hw,     -hh + r);
-    shape.absarc(-hw + r, -hh + r, r, Math.PI,     Math.PI * 1.5, false);
+    // Rounded rectangle when radius > 0 (clamped to fit), plain rectangle otherwise.
+    const r = plateShape === 'rectangle'
+      ? 0
+      : Math.max(0, Math.min(radius, length / 2 - 0.01, width / 2 - 0.01));
+    if (r <= 0) {
+      shape.moveTo(-hw, -hh);
+      shape.lineTo( hw, -hh);
+      shape.lineTo( hw,  hh);
+      shape.lineTo(-hw,  hh);
+      shape.closePath();
+    } else {
+      shape.moveTo(-hw + r, -hh);
+      shape.lineTo( hw - r, -hh);
+      shape.absarc( hw - r, -hh + r, r, -Math.PI / 2, 0,           false);
+      shape.lineTo( hw,      hh - r);
+      shape.absarc( hw - r,  hh - r, r, 0,           Math.PI / 2,  false);
+      shape.lineTo(-hw + r,  hh);
+      shape.absarc(-hw + r,  hh - r, r, Math.PI / 2, Math.PI,      false);
+      shape.lineTo(-hw,     -hh + r);
+      shape.absarc(-hw + r, -hh + r, r, Math.PI,     Math.PI * 1.5, false);
+    }
   }
 
   const geo = new THREE.ExtrudeGeometry(shape, {
@@ -168,27 +181,53 @@ function createPlateGeometry(length, width, thickness, radius, highDetail) {
 //     • old Z (extrusion) → new +Y  (raised text faces up)
 //     • old Y (glyph height) → new -Z  (glyph depth on plate, in -Z half)
 //   Translation then centers X/Z and lifts onto plate top face.
-function buildTextGeometry(text, font, fontSize, raise, thickness, highDetail) {
-  const geo = new TextGeometry(text, {
-    font,
-    size:          fontSize,
-    depth:         raise,
-    curveSegments: highDetail ? 12 : 5,
-    bevelEnabled:  false,
+function buildTextGeometry(text, font, fontSize, raise, thickness, highDetail, lineSpacing = 1.3, textStyle = 'raised') {
+  // Engraved text extrudes *down* into the plate; clamp its depth so it never
+  // pokes through the bottom face.
+  const effRaise = textStyle === 'engraved' ? Math.min(raise, thickness) : raise;
+
+  // Build one TextGeometry per line in the pre-rotation XY plane. Each line is
+  // centred on X; successive lines step downward in glyph-space (pre-rotation
+  // -Y), which becomes the +Z depth axis after the Rx(-90°) below — so lines
+  // stack front-to-back on the plate in natural reading order.
+  const lines = text.split('\n');
+  const lineGeos = [];
+  lines.forEach((line, i) => {
+    if (line.trim().length === 0) return;  // blank line still advances the row index
+    const g = new TextGeometry(line, {
+      font,
+      size:          fontSize,
+      depth:         effRaise,
+      curveSegments: highDetail ? 12 : 5,
+      bevelEnabled:  false,
+    });
+    g.computeBoundingBox();
+    const bb = g.boundingBox;
+    const lw = bb.max.x - bb.min.x;
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
+      -(bb.min.x + lw / 2),            // centre this line on X
+      -i * fontSize * lineSpacing,     // stack downward in glyph-space
+      0
+    ));
+    lineGeos.push(g);
   });
 
+  if (lineGeos.length === 0) return null;
+
+  const geo = lineGeos.length === 1 ? lineGeos[0] : mergeGeometries(lineGeos);
+  if (lineGeos.length > 1) lineGeos.forEach(g => g.dispose());
+
+  // Centre the whole block on Z and lift/recess onto the plate top face.
   geo.computeBoundingBox();
-  const bb   = geo.boundingBox;
-  const tw   = bb.max.x - bb.min.x;
-  const tyMid = (bb.min.y + bb.max.y) / 2;  // pre-rotation Y centre → post-rotation -Z centre
+  const bb = geo.boundingBox;
+  const tyMid = (bb.min.y + bb.max.y) / 2;
 
   geo.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
 
-  geo.applyMatrix4(new THREE.Matrix4().makeTranslation(
-    -(bb.min.x + tw / 2),  // centre on X
-    thickness / 2,         // sit on plate top face
-    tyMid                  // centre on Z (cancels the -Y offset from rotation)
-  ));
+  // raised  → text bottom sits on the top face (y = thickness/2)
+  // engraved → text top sits flush with the top face, body recessed into plate
+  const yOffset = textStyle === 'engraved' ? thickness / 2 - effRaise : thickness / 2;
+  geo.applyMatrix4(new THREE.Matrix4().makeTranslation(0, yOffset, tyMid));
 
   return geo;
 }
@@ -219,7 +258,7 @@ function rebuildScene() {
     const zOffset = -totalDepth  / 2 + row * (p.width  + LABEL_GAP) + p.width  / 2;
 
     const plate = new THREE.Mesh(
-      createPlateGeometry(p.length, p.width, p.thickness, p.radius, false),
+      createPlateGeometry(p.length, p.width, p.thickness, p.radius, false, p.plateShape),
       new THREE.MeshStandardMaterial({ color: p.plateColor, roughness: 0.45, metalness: 0.15 })
     );
     plate.position.x = xOffset;
@@ -229,12 +268,14 @@ function rebuildScene() {
 
     let textObj = null;
     if (txt.trim().length > 0 && font) {
-      const tg = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, false);
-      textObj = new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ color: p.textColor, roughness: 0.3, metalness: 0.1 }));
-      textObj.position.x = xOffset;
-      textObj.position.z = zOffset;
-      textObj.castShadow = true;
-      scene.add(textObj);
+      const tg = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, false, p.lineSpacing, p.textStyle);
+      if (tg) {
+        textObj = new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ color: p.textColor, roughness: 0.3, metalness: 0.1 }));
+        textObj.position.x = xOffset;
+        textObj.position.z = zOffset;
+        textObj.castShadow = true;
+        scene.add(textObj);
+      }
     }
 
     labelMeshes.push({ plate, text: textObj });
@@ -274,12 +315,13 @@ function scheduleRebuild() {
 
 // ── LocalStorage persistence ──────────────────────────────────────────────────
 const STORAGE_KEY = '3dlabel_v1';
-const PERSISTED_IDS = ['length','width','thickness','radius','text','font','fontSize','raise','plateColor','textColor','textMulti'];
+const PERSISTED_IDS = ['length','width','thickness','radius','plateShape','text','font','fontSize','raise','lineSpacing','plateColor','textColor','textMulti'];
 
 function saveToStorage() {
   const data = {};
   PERSISTED_IDS.forEach(id => { data[id] = document.getElementById(id).value; });
   data.mode = document.querySelector('input[name="mode"]:checked').value;
+  data.textStyle = document.querySelector('input[name="textStyle"]:checked').value;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
@@ -295,21 +337,42 @@ function loadFromStorage() {
       const radio = document.querySelector(`input[name="mode"][value="${data.mode}"]`);
       if (radio) { radio.checked = true; applyModeUI(data.mode); }
     }
+    if (data.textStyle) {
+      const styleRadio = document.querySelector(`input[name="textStyle"][value="${data.textStyle}"]`);
+      if (styleRadio) styleRadio.checked = true;
+    }
     // Keep hex text fields in sync with restored colour picker values.
     document.getElementById('plateColorHex').value = document.getElementById('plateColor').value;
     document.getElementById('textColorHex').value  = document.getElementById('textColor').value;
+    applyShapeUI();
   } catch (_) { /* corrupt storage — ignore */ }
 }
 
-['length','width','thickness','radius','text','fontSize','raise'].forEach(id =>
+['length','width','thickness','radius','text','fontSize','raise','lineSpacing'].forEach(id =>
   document.getElementById(id).addEventListener('input', () => { saveToStorage(); scheduleRebuild(); })
 );
 document.getElementById('font').addEventListener('change', () => { saveToStorage(); scheduleRebuild(); });
 document.getElementById('textMulti').addEventListener('input', () => { saveToStorage(); scheduleRebuild(); });
 
+document.getElementById('plateShape').addEventListener('change', () => {
+  applyShapeUI();
+  saveToStorage();
+  scheduleRebuild();
+});
+
+document.querySelectorAll('input[name="textStyle"]').forEach(radio =>
+  radio.addEventListener('change', () => { saveToStorage(); scheduleRebuild(); })
+);
+
 function applyModeUI(mode) {
   document.getElementById('fieldTextSingle').style.display   = mode === 'single'   ? '' : 'none';
   document.getElementById('fieldTextMultiple').style.display = mode === 'multiple' ? '' : 'none';
+}
+
+// Corner radius only applies to the rounded-rectangle shape — disable it otherwise.
+function applyShapeUI() {
+  const isRounded = document.getElementById('plateShape').value === 'roundedRect';
+  document.getElementById('radius').disabled = !isRounded;
 }
 
 document.querySelectorAll('input[name="mode"]').forEach(radio =>
@@ -348,6 +411,7 @@ document.getElementById('btnSaveSettings').addEventListener('click', () => {
   const data = {};
   PERSISTED_IDS.forEach(id => { data[id] = document.getElementById(id).value; });
   data.mode = document.querySelector('input[name="mode"]:checked').value;
+  data.textStyle = document.querySelector('input[name="textStyle"]:checked').value;
   triggerDownload(
     new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
     filename
@@ -373,8 +437,13 @@ document.getElementById('fileInput').addEventListener('change', e => {
         const radio = document.querySelector(`input[name="mode"][value="${data.mode}"]`);
         if (radio) { radio.checked = true; applyModeUI(data.mode); }
       }
+      if (data.textStyle) {
+        const styleRadio = document.querySelector(`input[name="textStyle"][value="${data.textStyle}"]`);
+        if (styleRadio) styleRadio.checked = true;
+      }
       document.getElementById('plateColorHex').value = document.getElementById('plateColor').value;
       document.getElementById('textColorHex').value  = document.getElementById('textColor').value;
+      applyShapeUI();
       saveToStorage();
       scheduleRebuild();
     } catch (_) { alert('Invalid settings file.'); }
@@ -420,17 +489,19 @@ document.getElementById('btnSTL').addEventListener('click', () => {
 
   for (let i = 0; i < n; i++) {
     const xOffset = -totalLength / 2 + i * (p.length + LABEL_GAP) + p.length / 2;
-    const plateNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true).toNonIndexed();
+    const plateNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true, p.plateShape).toNonIndexed();
     plateNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
     geosToMerge.push(plateNI);
 
     const txt = p.texts[i];
     if (txt.trim().length > 0 && font) {
-      const textGeo = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, true);
-      const textNI  = textGeo.index ? textGeo.toNonIndexed() : textGeo;
-      textNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
-      geosToMerge.push(textNI);
-      if (textGeo !== textNI) textGeo.dispose();
+      const textGeo = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, true, p.lineSpacing, p.textStyle);
+      if (textGeo) {
+        const textNI = textGeo.index ? textGeo.toNonIndexed() : textGeo;
+        textNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
+        geosToMerge.push(textNI);
+        if (textGeo !== textNI) textGeo.dispose();
+      }
     }
   }
 
@@ -602,7 +673,7 @@ function _make3mfBlob(p, multicolor) {
     const zOffset = -totalDepth  / 2 + row * (p.width  + LABEL_GAP) + p.width  / 2;
     const txt = p.texts[i];
 
-    const plateGeoNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true).toNonIndexed();
+    const plateGeoNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true, p.plateShape).toNonIndexed();
     plateGeoNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, zOffset));
     applyPrintTransform(plateGeoNI, p.thickness);
     disposables.push(plateGeoNI);
@@ -613,8 +684,10 @@ function _make3mfBlob(p, multicolor) {
 
     const hasText = txt.trim().length > 0;
     let textId = null;
-    if (hasText && font) {
-      const tg = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, true);
+    const tg = hasText && font
+      ? buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, true, p.lineSpacing, p.textStyle)
+      : null;
+    if (tg) {
       const textGeoNI = tg.index ? tg.toNonIndexed() : tg;
       textGeoNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, zOffset));
       applyPrintTransform(textGeoNI, p.thickness);
@@ -688,6 +761,7 @@ async function init() {
 
   // Restore saved values (must happen after options are in the DOM).
   loadFromStorage();
+  applyShapeUI();
 
   // Load all fonts in parallel
   const loader = new FontLoader();

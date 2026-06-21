@@ -75,6 +75,13 @@ input[type="text"]:focus,
 select:focus { border-color: #6666ff; }
 select option { background: #1a1a35; }
 
+input[type="number"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+input[type="number"]:disabled + label,
+.field:has(input:disabled) label { color: #55557a; }
+
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 .color-row {
