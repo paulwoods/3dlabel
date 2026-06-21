@@ -309,34 +309,45 @@ function scheduleRebuild() {
 const STORAGE_KEY = '3dlabel_v1';
 const PERSISTED_IDS = ['length','width','thickness','radius','plateShape','text','font','fontSize','raise','lineSpacing','plateColor','textColor','textMulti'];
 
-function saveToStorage() {
+// ── Settings (form ↔ plain object) ────────────────────────────────────────────
+// One pair of functions is the single source of truth for serialising the form.
+// localStorage and the settings file are two adapters over them. applySettings
+// only writes the DOM — callers decide whether to re-save / rebuild afterwards.
+function readSettings() {
   const data = {};
   PERSISTED_IDS.forEach(id => { data[id] = document.getElementById(id).value; });
   data.mode = document.querySelector('input[name="mode"]:checked').value;
   data.textStyle = document.querySelector('input[name="textStyle"]:checked').value;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  return data;
+}
+
+function applySettings(data) {
+  PERSISTED_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && data[id] !== undefined) el.value = data[id];
+  });
+  if (data.mode) {
+    const radio = document.querySelector(`input[name="mode"][value="${data.mode}"]`);
+    if (radio) { radio.checked = true; applyModeUI(data.mode); }
+  }
+  if (data.textStyle) {
+    const styleRadio = document.querySelector(`input[name="textStyle"][value="${data.textStyle}"]`);
+    if (styleRadio) styleRadio.checked = true;
+  }
+  // Keep hex text fields in sync with restored colour picker values.
+  document.getElementById('plateColorHex').value = document.getElementById('plateColor').value;
+  document.getElementById('textColorHex').value  = document.getElementById('textColor').value;
+  applyShapeUI();
+}
+
+function saveToStorage() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(readSettings()));
 }
 
 function loadFromStorage() {
   try {
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (!data) return;
-    PERSISTED_IDS.forEach(id => {
-      const el = document.getElementById(id);
-      if (el && data[id] !== undefined) el.value = data[id];
-    });
-    if (data.mode) {
-      const radio = document.querySelector(`input[name="mode"][value="${data.mode}"]`);
-      if (radio) { radio.checked = true; applyModeUI(data.mode); }
-    }
-    if (data.textStyle) {
-      const styleRadio = document.querySelector(`input[name="textStyle"][value="${data.textStyle}"]`);
-      if (styleRadio) styleRadio.checked = true;
-    }
-    // Keep hex text fields in sync with restored colour picker values.
-    document.getElementById('plateColorHex').value = document.getElementById('plateColor').value;
-    document.getElementById('textColorHex').value  = document.getElementById('textColor').value;
-    applyShapeUI();
+    if (data) applySettings(data);
   } catch (_) { /* corrupt storage — ignore */ }
 }
 
@@ -400,12 +411,8 @@ document.getElementById('btnSaveSettings').addEventListener('click', () => {
   const name = prompt('Save settings as:', '3dlabel-settings');
   if (name === null) return;
   const filename = (name.trim() || '3dlabel-settings').replace(/\.json$/i, '') + '.json';
-  const data = {};
-  PERSISTED_IDS.forEach(id => { data[id] = document.getElementById(id).value; });
-  data.mode = document.querySelector('input[name="mode"]:checked').value;
-  data.textStyle = document.querySelector('input[name="textStyle"]:checked').value;
   triggerDownload(
-    new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }),
+    new Blob([JSON.stringify(readSettings(), null, 2)], { type: 'application/json' }),
     filename
   );
 });
@@ -420,22 +427,7 @@ document.getElementById('fileInput').addEventListener('change', e => {
   const reader = new FileReader();
   reader.onload = ev => {
     try {
-      const data = JSON.parse(ev.target.result);
-      PERSISTED_IDS.forEach(id => {
-        const el = document.getElementById(id);
-        if (el && data[id] !== undefined) el.value = data[id];
-      });
-      if (data.mode) {
-        const radio = document.querySelector(`input[name="mode"][value="${data.mode}"]`);
-        if (radio) { radio.checked = true; applyModeUI(data.mode); }
-      }
-      if (data.textStyle) {
-        const styleRadio = document.querySelector(`input[name="textStyle"][value="${data.textStyle}"]`);
-        if (styleRadio) styleRadio.checked = true;
-      }
-      document.getElementById('plateColorHex').value = document.getElementById('plateColor').value;
-      document.getElementById('textColorHex').value  = document.getElementById('textColor').value;
-      applyShapeUI();
+      applySettings(JSON.parse(ev.target.result));
       saveToStorage();
       scheduleRebuild();
     } catch (_) { alert('Invalid settings file.'); }

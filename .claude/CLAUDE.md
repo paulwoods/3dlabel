@@ -44,4 +44,4 @@ The project is six files: `index.html` (markup + importmap), `style.css` (all st
 
 **Font loading:** All 11 fonts are fetched in parallel at startup via `FontLoader.loadAsync` and cached in a `Map<url, Font>`. The scene will not render text until the selected font is in the cache.
 
-**Persistence:** `localStorage` under the key `3dlabel_v1` saves all input field values on every change and restores them on load.
+**Persistence / settings:** `readSettings()` (form → plain object) and `applySettings(data)` (object → form) are the single source of truth for serialising the form; both are DOM-bound and live in `main.js`. localStorage (key `3dlabel_v1`, saved on every change, restored on load) and the Save/Load settings `.json` file are two adapters over that pair. `applySettings` only writes the DOM — callers decide whether to re-save / rebuild afterwards (so the init-time restore doesn't re-save, but a file load does).
