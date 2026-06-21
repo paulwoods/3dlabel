@@ -22,7 +22,7 @@ node --test
 
 ## Architecture
 
-The project is five files: `index.html` (markup + importmap), `style.css` (all styles), `main.js` (all browser logic), and two pure, dependency-free cores — `layout.js` (label placement) and `label-model.js` (export-ready geometry orchestration). Three.js and its add-ons are loaded from CDN via an importmap in `index.html`; there are no local dependencies and no build step. `main.js` imports the cores natively (e.g. `import { layoutLabels } from './layout.js'`). The importmap must stay in `index.html` — browsers process it at parse time before any module scripts run.
+The project is six files: `index.html` (markup + importmap), `style.css` (all styles), `main.js` (all browser logic), and three pure, dependency-free cores — `layout.js` (label placement), `label-model.js` (export-ready geometry orchestration), and `threemf.js` (3MF document + ZIP assembly). Three.js and its add-ons are loaded from CDN via an importmap in `index.html`; there are no local dependencies and no build step. `main.js` imports the cores natively (e.g. `import { layoutLabels } from './layout.js'`). The importmap must stay in `index.html` — browsers process it at parse time before any module scripts run.
 
 **Layout module (`layout.js`):** `layoutLabels(n, length, width, gap)` returns `{ placements: [{x, z}, …], totalLength, totalDepth }` — the single source of truth for where N labels sit on the build plate (square-ish grid, `cols = ⌈√n⌉`, centered on the origin, partial last row left-aligned). The preview (`rebuildScene`), camera-fit (`fitCamera`), STL export, and 3MF export all consume it, so they cannot disagree about placement. It has zero `THREE` dependency and is unit-tested headlessly in `layout.test.js` (`node --test`).
 
@@ -38,7 +38,9 @@ The project is five files: `index.html` (markup + importmap), `style.css` (all s
 
 **Export formats:**
 - **STL** — plate and text merged into a single `BufferGeometry` via `mergeGeometries`, exported binary.
-- **3MF** — custom ZIP writer (`_makeZip`) with no external dependency. Plate and text are separate `<object>` elements, each tagged with a color via the 3MF materials extension (`m:colorid`). Both appear as separate build items so slicers can assign different filaments.
+- **3MF** — built by `threemf.js` (see below). Plate and text are separate `<object>` elements, each tagged with a color via the 3MF materials extension (`m:colorid`); in multi-filament mode both appear as separate build items so slicers can assign different filaments.
+
+**3MF document module (`threemf.js`):** `build3mf({ labels, plateColor, textColor, multicolor }) → Uint8Array` turns the `buildLabelModel` output plus colors into the bytes of a `.3mf` package. Pure and import-free — no `THREE`, no DOM; geometry is touched only through the read-only `position` accessor, so tests pass fake geometries. `buildModelXML(...) → string` is an internal seam exported so `threemf.test.js` can assert the document assembly (colorid tags, build items, single- vs multi-filament `<component>` grouping) directly as a string; `build3mf` wraps it with the OPC parts and the STORE-zip writer (`_makeZip`/`_crc32`, also here). `main.js`'s `_make3mfBlob` is now just glue: produce the model, call `build3mf`, dispose geometries, wrap in a `Blob`. The single-filament (`multicolor=false`) component-grouping path is currently not wired to a button but is preserved and tested.
 
 **Font loading:** All 11 fonts are fetched in parallel at startup via `FontLoader.loadAsync` and cached in a `Map<url, Font>`. The scene will not render text until the selected font is in the cache.
 
