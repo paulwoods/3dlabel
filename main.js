@@ -5,6 +5,7 @@ import { TextGeometry }        from 'three/addons/geometries/TextGeometry.js';
 import { STLExporter }         from 'three/addons/exporters/STLExporter.js';
 import { mergeGeometries }     from 'three/addons/utils/BufferGeometryUtils.js';
 import { layoutLabels }        from './layout.js';
+import { buildLabelModel, isFontReady } from './label-model.js';
 
 // ── Font catalogue ────────────────────────────────────────────────────────────
 const FONT_BASE = 'https://cdn.jsdelivr.net/npm/three@0.184.0/examples/fonts/';
@@ -454,6 +455,24 @@ function applyPrintTransform(geo, thickness) {
   geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(T, R));
 }
 
+// ── Export ops (the THREE-bound leaves injected into buildLabelModel) ──────────
+// Kept here so label-model.js stays import-free and Node-testable. bakeForExport
+// is the single home of the non-index → translate → print-transform recipe that
+// STL and 3MF used to each re-implement.
+const exportOps = {
+  buildPlate: (s) =>
+    createPlateGeometry(s.length, s.width, s.thickness, s.radius, true, s.plateShape),
+  buildText: (s, txt, font) =>
+    buildTextGeometry(txt, font, s.fontSize, s.raise, s.thickness, true, s.lineSpacing, s.textStyle),
+  bakeForExport: (geo, placement, thickness) => {
+    const ni = geo.index ? geo.toNonIndexed() : geo;
+    if (ni !== geo) geo.dispose();
+    ni.applyMatrix4(new THREE.Matrix4().makeTranslation(placement.x, 0, placement.z));
+    applyPrintTransform(ni, thickness);
+    return ni;
+  },
+};
+
 // ── Download helper ───────────────────────────────────────────────────────────
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -470,36 +489,17 @@ document.getElementById('btnSTL').addEventListener('click', () => {
   if (name === null) return;
   const filename = (name.trim() || 'label').replace(/\.stl$/i, '') + '.stl';
   const p = readParams();
+  if (!isFontReady(p, loadedFonts)) { alert('Fonts still loading — please try again in a moment.'); return; }
+
   const font = loadedFonts.get(p.fontUrl);
-  if (p.texts.some(t => t.trim()) && !font) { alert('Fonts still loading — please try again in a moment.'); return; }
-
-  const n = p.texts.length;
-  const { placements } = layoutLabels(n, p.length, p.width, LABEL_GAP);
-  const geosToMerge = [];
-
-  for (let i = 0; i < n; i++) {
-    const { x: xOffset, z: zOffset } = placements[i];
-    const plateNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true, p.plateShape).toNonIndexed();
-    plateNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, zOffset));
-    geosToMerge.push(plateNI);
-
-    const txt = p.texts[i];
-    if (txt.trim().length > 0 && font) {
-      const textGeo = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, true, p.lineSpacing, p.textStyle);
-      if (textGeo) {
-        const textNI = textGeo.index ? textGeo.toNonIndexed() : textGeo;
-        textNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, zOffset));
-        geosToMerge.push(textNI);
-        if (textGeo !== textNI) textGeo.dispose();
-      }
-    }
-  }
+  const { placements } = layoutLabels(p.texts.length, p.length, p.width, LABEL_GAP);
+  const model = buildLabelModel(p, font, placements, exportOps);
+  // Geometry is already export-baked (placed + print-transformed) per part.
+  const geosToMerge = model.flatMap(l => l.text ? [l.plate, l.text] : [l.plate]);
 
   const exportGeo = mergeGeometries(geosToMerge);
   geosToMerge.forEach(g => g.dispose());
   if (!exportGeo) { console.error('mergeGeometries returned null'); alert('Export failed.'); return; }
-
-  applyPrintTransform(exportGeo, p.thickness);
 
   const tmpScene = new THREE.Scene();
   tmpScene.add(new THREE.Mesh(exportGeo, new THREE.MeshStandardMaterial()));
@@ -637,11 +637,12 @@ function _buildMeshXML(geometry, objectId) {
 // multicolor=false → plate + text merged as one component (single-filament).
 // multicolor=true  → plate and text as separate build items (multi-filament).
 function _make3mfBlob(p, multicolor) {
-  const font = loadedFonts.get(p.fontUrl);
-  if (p.texts.some(t => t.trim()) && !font) { alert('Fonts still loading — please try again in a moment.'); return null; }
+  if (!isFontReady(p, loadedFonts)) { alert('Fonts still loading — please try again in a moment.'); return null; }
 
-  const n = p.texts.length;
-  const { placements } = layoutLabels(n, p.length, p.width, LABEL_GAP);
+  const font = loadedFonts.get(p.fontUrl);
+  const { placements } = layoutLabels(p.texts.length, p.length, p.width, LABEL_GAP);
+  const model = buildLabelModel(p, font, placements, exportOps);
+
   const matNS = 'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"';
   const colorGroups = `
   <m:colorgroup id="1"><m:color color="${p.plateColor}"/></m:colorgroup>
@@ -653,31 +654,17 @@ function _make3mfBlob(p, multicolor) {
   let nextId = 1;
   const disposables = [];
 
-  for (let i = 0; i < n; i++) {
-    const { x: xOffset, z: zOffset } = placements[i];
-    const txt = p.texts[i];
-
-    const plateGeoNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true, p.plateShape).toNonIndexed();
-    plateGeoNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, zOffset));
-    applyPrintTransform(plateGeoNI, p.thickness);
-    disposables.push(plateGeoNI);
-
+  for (const { plate, text } of model) {
+    disposables.push(plate);
     const plateId = nextId++;
-    meshObjectsXML += _buildMeshXML(plateGeoNI, plateId)
+    meshObjectsXML += _buildMeshXML(plate, plateId)
       .replace(`<object id="${plateId}"`, `<object id="${plateId}" m:colorid="1"`);
 
-    const hasText = txt.trim().length > 0;
     let textId = null;
-    const tg = hasText && font
-      ? buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, true, p.lineSpacing, p.textStyle)
-      : null;
-    if (tg) {
-      const textGeoNI = tg.index ? tg.toNonIndexed() : tg;
-      textGeoNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, zOffset));
-      applyPrintTransform(textGeoNI, p.thickness);
-      disposables.push(textGeoNI);
+    if (text) {
+      disposables.push(text);
       textId = nextId++;
-      meshObjectsXML += _buildMeshXML(textGeoNI, textId)
+      meshObjectsXML += _buildMeshXML(text, textId)
         .replace(`<object id="${textId}"`, `<object id="${textId}" m:colorid="2"`);
     }
 
