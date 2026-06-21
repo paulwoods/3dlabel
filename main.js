@@ -4,6 +4,7 @@ import { FontLoader }          from 'three/addons/loaders/FontLoader.js';
 import { TextGeometry }        from 'three/addons/geometries/TextGeometry.js';
 import { STLExporter }         from 'three/addons/exporters/STLExporter.js';
 import { mergeGeometries }     from 'three/addons/utils/BufferGeometryUtils.js';
+import { layoutLabels }        from './layout.js';
 
 // ── Font catalogue ────────────────────────────────────────────────────────────
 const FONT_BASE = 'https://cdn.jsdelivr.net/npm/three@0.184.0/examples/fonts/';
@@ -244,18 +245,11 @@ function rebuildScene() {
   }
   labelMeshes = [];
 
-  const n = p.texts.length;
-  const cols = Math.ceil(Math.sqrt(n));
-  const rows = Math.ceil(n / cols);
-  const totalLength = cols * p.length + (cols - 1) * LABEL_GAP;
-  const totalDepth  = rows * p.width  + (rows - 1) * LABEL_GAP;
+  const { placements } = layoutLabels(p.texts.length, p.length, p.width, LABEL_GAP);
   const font = loadedFonts.get(p.fontUrl);
 
   p.texts.forEach((txt, i) => {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const xOffset = -totalLength / 2 + col * (p.length + LABEL_GAP) + p.length / 2;
-    const zOffset = -totalDepth  / 2 + row * (p.width  + LABEL_GAP) + p.width  / 2;
+    const { x: xOffset, z: zOffset } = placements[i];
 
     const plate = new THREE.Mesh(
       createPlateGeometry(p.length, p.width, p.thickness, p.radius, false, p.plateShape),
@@ -285,11 +279,7 @@ function rebuildScene() {
 // ── Camera fit ────────────────────────────────────────────────────────────────
 function fitCamera() {
   const p = readParams();
-  const n = p.texts.length;
-  const cols = Math.ceil(Math.sqrt(n));
-  const rows = Math.ceil(n / cols);
-  const totalLength = cols * p.length + (cols - 1) * LABEL_GAP;
-  const totalDepth  = rows * p.width  + (rows - 1) * LABEL_GAP;
+  const { totalLength, totalDepth } = layoutLabels(p.texts.length, p.length, p.width, LABEL_GAP);
   const halfL = totalLength / 2;
   const halfD = totalDepth  / 2;
   const halfT = (p.thickness + p.raise) / 2;
@@ -484,13 +474,13 @@ document.getElementById('btnSTL').addEventListener('click', () => {
   if (p.texts.some(t => t.trim()) && !font) { alert('Fonts still loading — please try again in a moment.'); return; }
 
   const n = p.texts.length;
-  const totalLength = n * p.length + (n - 1) * LABEL_GAP;
+  const { placements } = layoutLabels(n, p.length, p.width, LABEL_GAP);
   const geosToMerge = [];
 
   for (let i = 0; i < n; i++) {
-    const xOffset = -totalLength / 2 + i * (p.length + LABEL_GAP) + p.length / 2;
+    const { x: xOffset, z: zOffset } = placements[i];
     const plateNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true, p.plateShape).toNonIndexed();
-    plateNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
+    plateNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, zOffset));
     geosToMerge.push(plateNI);
 
     const txt = p.texts[i];
@@ -498,7 +488,7 @@ document.getElementById('btnSTL').addEventListener('click', () => {
       const textGeo = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, true, p.lineSpacing, p.textStyle);
       if (textGeo) {
         const textNI = textGeo.index ? textGeo.toNonIndexed() : textGeo;
-        textNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, 0));
+        textNI.applyMatrix4(new THREE.Matrix4().makeTranslation(xOffset, 0, zOffset));
         geosToMerge.push(textNI);
         if (textGeo !== textNI) textGeo.dispose();
       }
@@ -651,10 +641,7 @@ function _make3mfBlob(p, multicolor) {
   if (p.texts.some(t => t.trim()) && !font) { alert('Fonts still loading — please try again in a moment.'); return null; }
 
   const n = p.texts.length;
-  const cols = Math.ceil(Math.sqrt(n));
-  const rows = Math.ceil(n / cols);
-  const totalLength = cols * p.length + (cols - 1) * LABEL_GAP;
-  const totalDepth  = rows * p.width  + (rows - 1) * LABEL_GAP;
+  const { placements } = layoutLabels(n, p.length, p.width, LABEL_GAP);
   const matNS = 'xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02"';
   const colorGroups = `
   <m:colorgroup id="1"><m:color color="${p.plateColor}"/></m:colorgroup>
@@ -667,10 +654,7 @@ function _make3mfBlob(p, multicolor) {
   const disposables = [];
 
   for (let i = 0; i < n; i++) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const xOffset = -totalLength / 2 + col * (p.length + LABEL_GAP) + p.length / 2;
-    const zOffset = -totalDepth  / 2 + row * (p.width  + LABEL_GAP) + p.width  / 2;
+    const { x: xOffset, z: zOffset } = placements[i];
     const txt = p.texts[i];
 
     const plateGeoNI = createPlateGeometry(p.length, p.width, p.thickness, p.radius, true, p.plateShape).toNonIndexed();
