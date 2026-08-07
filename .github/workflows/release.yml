@@ -1,16 +1,44 @@
-name: Build and Publish Docker Image
+name: Test, Build, Tag and Publish
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - develop
+
+permissions:
+  contents: write
+
+# Two pushes in quick succession would race on the tag and the develop push, so
+# releases run one at a time; queued runs wait rather than being cancelled.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  build-and-push:
+  release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run tests
+        run: node --test
+
+      # Computed before the build because the image tags need it. package.json
+      # is left uncommitted until the publish succeeds, and .dockerignore keeps
+      # it out of the image, so nothing shipped depends on this write.
+      # npm silently invents 0.0.1 if package.json has no version field, so the
+      # field is the source of truth and must stay present.
+      - name: Bump patch version
+        id: bump
+        run: |
+          npm version patch --no-git-tag-version > /dev/null
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -18,14 +46,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # The push event's ref is a branch, so semver tags need the version passed
+      # in explicitly rather than read from the ref.
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: paulwoods/3dlabel
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=v${{ steps.bump.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.bump.outputs.version }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -34,3 +64,15 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      # Last, so a failed test or build leaves no tag behind. Pushes
+      # authenticated with GITHUB_TOKEN do not trigger workflows, so this cannot
+      # re-enter itself; [skip ci] states that intent in the log too.
+      - name: Commit and tag
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git commit -am "Release v${{ steps.bump.outputs.version }} [skip ci]"
+          git tag "v${{ steps.bump.outputs.version }}"
+          git push origin HEAD:develop
+          git push origin "v${{ steps.bump.outputs.version }}"
