@@ -24,22 +24,36 @@ Options considered:
 
 Option 3. `applyPrintTransform(geo, thickness)` bakes the correction into export
 geometry as part of the "Bake for export" recipe
-([ADR-0004](0004-one-bake-for-export-recipe.md)):
+([ADR-0004](0004-one-bake-for-export-recipe.md)).
+
+The matrix itself is `printMatrix(thickness)` in `geometry-math.js` — a pure
+function returning the 16 elements in `THREE.Matrix4`'s column-major order, so
+the orientation rule can be tested headlessly ([ADR-0002](0002-pure-cores-injected-ops.md)):
 
 ```js
-const R = new THREE.Matrix4().makeRotationX(Math.PI / 2); // Y → Z
-const T = new THREE.Matrix4().makeTranslation(0, 0, thickness / 2);
-geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(T, R));
+// geometry-math.js — Rx(+90°) then lift by thickness/2 along the new Z
+[1, 0, 0, 0,  0, 0, 1, 0,  0, -1, 0, 0,  0, 0, thickness / 2, 1]
+
+// main.js — the THREE-bound application
+geo.applyMatrix4(new THREE.Matrix4().fromArray(printMatrix(thickness)));
 ```
 
 `Rx(+90°)` maps Three.js Y → slicer Z; the translate lifts the plate so its
 bottom (`y = −thickness/2` before rotation) lands at slicer **Z = 0**. The preview
 scene is never transformed.
 
+The elements are written out rather than composed from `makeRotationX(π/2)`
+because `cos(π/2)` is `6.1e-17` in floating point, which would otherwise scatter
+trig dust through every exported vertex.
+
 ## Consequences
 
 - **Models drop onto the build plate correctly with no manual step.** The most
   common per-print chore is eliminated.
+- **The orientation rule is executable.** `geometry-math.test.js` asserts the
+  invariants directly — plate bottom lands at `z = 0`, `+Y` becomes `+Z`, `X` is
+  untouched — by transforming points, not by restating the element values. A
+  regression here would silently ship sideways models to every user.
 - **Preview math stays Three.js-natural.** Cameras, controls, and the
   `BoxGeometry`-style centering conventions all keep working in Y-up.
 - **Two coordinate frames coexist.** Preview geometry is Y-up; exported geometry

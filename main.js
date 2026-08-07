@@ -8,6 +8,7 @@ import { layoutLabels }        from './layout.js';
 import { buildLabelModel, isFontReady } from './label-model.js';
 import { build3mf }            from './threemf.js';
 import { normalizeSpec }       from './spec.js';
+import { fitRadius, planTextPlacement, printMatrix } from './geometry-math.js';
 
 // ── Font catalogue ────────────────────────────────────────────────────────────
 const FONT_BASE = 'https://cdn.jsdelivr.net/npm/three@0.184.0/examples/fonts/';
@@ -135,9 +136,7 @@ function createPlateGeometry(length, width, thickness, radius, highDetail, plate
     shape.absellipse(0, 0, rx, ry, 0, Math.PI * 2, false, 0);
   } else {
     // Rounded rectangle when radius > 0 (clamped to fit), plain rectangle otherwise.
-    const r = plateShape === 'rectangle'
-      ? 0
-      : Math.max(0, Math.min(radius, length / 2 - 0.01, width / 2 - 0.01));
+    const r = fitRadius(radius, length, width, plateShape);
     if (r <= 0) {
       shape.moveTo(-hw, -hh);
       shape.lineTo( hw, -hh);
@@ -181,9 +180,10 @@ function createPlateGeometry(length, width, thickness, radius, highDetail, plate
 //     • old Y (glyph height) → new -Z  (glyph depth on plate, in -Z half)
 //   Translation then centers X/Z and lifts onto plate top face.
 function buildTextGeometry(text, font, fontSize, raise, thickness, highDetail, lineSpacing = 1.3, textStyle = 'raised') {
-  // Engraved text extrudes *down* into the plate; clamp its depth so it never
-  // pokes through the bottom face.
-  const effRaise = textStyle === 'engraved' ? Math.min(raise, thickness) : raise;
+  // How deep the glyphs cut and where they sit on Y — one decision, made in
+  // geometry-math.js so the engraved clamp is tested. yOffset is applied after
+  // the rotation below; effRaise is the extrusion depth.
+  const { effRaise, yOffset } = planTextPlacement(raise, thickness, textStyle);
 
   // Build one TextGeometry per line in the pre-rotation XY plane. Each line is
   // centred on X; successive lines step downward in glyph-space (pre-rotation
@@ -225,7 +225,6 @@ function buildTextGeometry(text, font, fontSize, raise, thickness, highDetail, l
 
   // raised  → text bottom sits on the top face (y = thickness/2)
   // engraved → text top sits flush with the top face, body recessed into plate
-  const yOffset = textStyle === 'engraved' ? thickness / 2 - effRaise : thickness / 2;
   geo.applyMatrix4(new THREE.Matrix4().makeTranslation(0, yOffset, tyMid));
 
   return geo;
@@ -435,13 +434,11 @@ document.getElementById('fileInput').addEventListener('change', e => {
 // ── Print-orientation transform ───────────────────────────────────────────────
 // Three.js is Y-up; slicers (Bambu Studio, PrusaSlicer) are Z-up.
 // Without correction the model exports sideways and slicers lay the wrong face
-// on the build plate.  This bakes the correct orientation into the geometry:
-//   Rx(+90°) maps Three.js Y → slicer Z, then translate so the plate bottom
-//   (y = -thickness/2) lands at slicer Z = 0.
+// on the build plate.  The matrix itself — Rx(+90°) then a lift so the plate
+// bottom lands at slicer Z = 0 — lives in geometry-math.js, where its invariants
+// are tested; this applies it.
 function applyPrintTransform(geo, thickness) {
-  const R = new THREE.Matrix4().makeRotationX(Math.PI / 2);
-  const T = new THREE.Matrix4().makeTranslation(0, 0, thickness / 2);
-  geo.applyMatrix4(new THREE.Matrix4().multiplyMatrices(T, R));
+  geo.applyMatrix4(new THREE.Matrix4().fromArray(printMatrix(thickness)));
 }
 
 // ── Export ops (the THREE-bound leaves injected into buildLabelModel) ──────────
