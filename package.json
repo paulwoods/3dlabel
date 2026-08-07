@@ -1,6 +1,6 @@
 {
   "name": "3dlabel",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
   "description": "Config only — marks .js files as ES modules so Node's built-in test runner can import layout.js, and holds the release version that CI bumps and tags. No dependencies; the app itself has no build step.",
