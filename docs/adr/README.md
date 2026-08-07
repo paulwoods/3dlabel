@@ -31,6 +31,7 @@ for export**, **Ops**, **3MF document**, **Settings**).
 | [0006](0006-hand-rolled-3mf.md) | Hand-roll the 3MF package instead of taking a dependency | Accepted |
 | [0007](0007-settings-serialization-pair.md) | One settings serialization pair; localStorage and file are adapters | Accepted |
 | [0008](0008-one-field-manifest.md) | One field manifest drives validation, reading, persistence, and wiring | Accepted |
+| [0009](0009-preview-and-export-assembly-stay-separate.md) | Preview and export assembly stay separate; only the text gate is shared | Accepted |
 
 ## Relationships
 
@@ -41,5 +42,8 @@ for export**, **Ops**, **3MF document**, **Settings**).
                    │                  └─ applies ──> 0005 (print transform)
                    └─ instance ──> 0006 (hand-rolled 3MF document)
 0003 (layout SSOT) ── same SSOT discipline as ──> 0007 (settings pair)
-                                                    └─ extended by ──> 0008 (field manifest)
+  │                                                 └─ extended by ──> 0008 (field manifest)
+  └─ one of the two things ──> 0009 (preview/export share the gate, not the loop)
+     keeping the two loops
+     in agreement
 ```

@@ -5,7 +5,7 @@ import { TextGeometry }        from 'three/addons/geometries/TextGeometry.js';
 import { STLExporter }         from 'three/addons/exporters/STLExporter.js';
 import { mergeGeometries }     from 'three/addons/utils/BufferGeometryUtils.js';
 import { layoutLabels }        from './layout.js';
-import { buildLabelModel, isFontReady, labelParts, disposeLabelModel } from './label-model.js';
+import { buildLabelModel, isFontReady, labelParts, disposeLabelModel, wantsText } from './label-model.js';
 import { build3mf }            from './threemf.js';
 import { normalizeSpec }       from './spec.js';
 import { FIELDS }              from './fields.js';
@@ -277,7 +277,7 @@ function rebuildScene() {
     scene.add(plate);
 
     let textObj = null;
-    if (txt.trim().length > 0 && font) {
+    if (wantsText(txt, font)) {
       const tg = buildTextGeometry(txt, font, p.fontSize, p.raise, p.thickness, false, p.lineSpacing, p.textStyle);
       if (tg) {
         textObj = new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ color: p.textColor, roughness: 0.3, metalness: 0.1 }));

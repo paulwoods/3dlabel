@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLabelModel, isFontReady, labelParts, disposeLabelModel } from './label-model.js';
+import { buildLabelModel, isFontReady, labelParts, disposeLabelModel, wantsText } from './label-model.js';
 
 // Fake ops: return tagged sentinels instead of THREE geometry, and record how
 // bakeForExport was called so the orchestration can be asserted without THREE.
@@ -54,6 +54,30 @@ test('each geometry is baked with its own placement and the spec thickness', () 
   // plate of label 1 baked at placement 1
   assert.deepEqual(ops.bakeCalls[0].placement, { x: -5, z: -5 });
   assert.deepEqual(ops.bakeCalls[2].placement, { x: 5, z: 5 });
+});
+
+// ── wantsText ─────────────────────────────────────────────────────────────────
+// The one decision the preview loop and the export loop must agree on. They
+// build different things into different sinks, but a label either gets text in
+// both or in neither — a disagreement here means the preview lies about the
+// print.
+test('a label wants text only with non-blank content and a font to render it', () => {
+  const font = {};
+  assert.equal(wantsText('Hello', font), true);
+  assert.equal(wantsText('',      font), false);
+  assert.equal(wantsText('   ',   font), false);
+  assert.equal(wantsText('\n\t ', font), false);
+  assert.equal(wantsText('Hello', null),      false);
+  assert.equal(wantsText('Hello', undefined), false);
+});
+
+test('wantsText returns a real boolean, not the font it was handed', () => {
+  // The inlined form was `txt.trim().length > 0 && font`, which evaluates to the
+  // *font object* when true. Fine for an `if`, wrong the moment a caller stores
+  // or compares the result. The extracted predicate normalizes it.
+  const font = { name: 'helvetiker' };
+  assert.strictEqual(wantsText('Hi', font), true);
+  assert.strictEqual(wantsText('', font), false);
 });
 
 // ── labelParts / disposeLabelModel ────────────────────────────────────────────

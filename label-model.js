@@ -24,13 +24,30 @@ export function buildLabelModel(spec, font, placements, ops) {
     const plate = ops.bakeForExport(ops.buildPlate(spec), placement, spec.thickness);
 
     let text = null;
-    if (txt.trim().length > 0 && font) {
+    if (wantsText(txt, font)) {
       const raw = ops.buildText(spec, txt, font);
       if (raw) text = ops.bakeForExport(raw, placement, spec.thickness);
     }
 
     return { plate, text };
   });
+}
+
+// Whether a label gets text at all: it needs non-blank content *and* a loaded
+// font to render it with. Blank labels are plate-only, and a label whose font
+// is still downloading stays plate-only until it arrives.
+//
+// This is the one decision the preview loop (rebuildScene) and the export loop
+// (buildLabelModel) must agree on. They are otherwise deliberately separate —
+// different detail levels, different sinks, different lifetimes (ADR-0009) —
+// but a label must get text in both or in neither, or the preview lies about
+// what will print. Both call this rather than repeating the condition.
+//
+// Returns a real boolean. The inlined form was `txt.trim().length > 0 && font`,
+// which evaluates to the font *object* when true — harmless inside an `if`,
+// wrong as soon as a caller stores or compares it.
+export function wantsText(txt, font) {
+  return txt.trim().length > 0 && !!font;
 }
 
 // Every geometry in a model as one flat list — plate then text per label, in
