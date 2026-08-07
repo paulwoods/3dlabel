@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - develop
+  # Manual trigger, so a release can be run without an otherwise pointless
+  # commit — including when a push was skipped because its commit message
+  # happened to mention a CI skip marker.
+  workflow_dispatch:
 
 permissions:
   contents: write
