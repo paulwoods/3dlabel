@@ -25,7 +25,7 @@ Three.js-bound and not worth testing.
 ## Decision
 
 Separate the two. Extract the decision-making logic into **pure modules that
-import nothing** — `layout.js`, `label-model.js`, `threemf.js`. Every
+import nothing** — `spec.js`, `layout.js`, `label-model.js`, `threemf.js`. Every
 Three.js-bound leaf operation is **injected** as an `ops` object:
 
 ```js
@@ -43,10 +43,10 @@ install. `package.json` stays config-only.
 
 ## Consequences
 
-- **The interface is the test surface.** `label-model.test.js`,
-  `layout.test.js`, and `threemf.test.js` exercise the per-label loop, the
-  text/no-text branch, placement pairing, and the full 3MF document assembly with
-  zero browser. The leaf ops that *can't* be tested headlessly are also the ones
+- **The interface is the test surface.** `spec.test.js`, `label-model.test.js`,
+  `layout.test.js`, and `threemf.test.js` exercise the parameter clamps and
+  defaults, the per-label loop, the text/no-text branch, placement pairing, and
+  the full 3MF document assembly with zero browser. The leaf ops that *can't* be tested headlessly are also the ones
   not worth testing.
 - **The cores are deep and relocatable** — zero dependencies, reasoned about in
   isolation, no hidden coupling to scene state.

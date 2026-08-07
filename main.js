@@ -7,6 +7,7 @@ import { mergeGeometries }     from 'three/addons/utils/BufferGeometryUtils.js';
 import { layoutLabels }        from './layout.js';
 import { buildLabelModel, isFontReady } from './label-model.js';
 import { build3mf }            from './threemf.js';
+import { normalizeSpec }       from './spec.js';
 
 // ── Font catalogue ────────────────────────────────────────────────────────────
 const FONT_BASE = 'https://cdn.jsdelivr.net/npm/three@0.184.0/examples/fonts/';
@@ -93,33 +94,28 @@ let labelMeshes = [];
 let rebuildTimer = null;
 
 // ── Parameter reader ──────────────────────────────────────────────────────────
+// Thin DOM adapter: gathers raw form values (as strings) and hands them to the
+// pure, headlessly-tested normalizeSpec in spec.js. The clamps, defaults, and
+// mode → texts expansion live there — one tested seam between the DOM and the
+// rest of the app. An instance of the pure-core pattern (ADR-0002).
 function readParams() {
-  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-  const mode = document.querySelector('input[name="mode"]:checked').value;
-  let texts;
-  if (mode === 'multiple') {
-    texts = document.getElementById('textMulti').value
-      .split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    if (texts.length === 0) texts = [''];
-  } else {
-    texts = [document.getElementById('text').value];
-  }
-  return {
-    length:     clamp(parseFloat(document.getElementById('length').value)    || 100, 1,  500),
-    width:      clamp(parseFloat(document.getElementById('width').value)     || 50,  1,  500),
-    thickness:  clamp(parseFloat(document.getElementById('thickness').value) || 5,   0.5, 50),
-    radius:     clamp(parseFloat(document.getElementById('radius').value)    || 5,   0,   100),
-    plateShape: document.getElementById('plateShape').value,
-    texts,
-    mode,
-    fontUrl:    document.getElementById('font').value,
-    fontSize:   clamp(parseFloat(document.getElementById('fontSize').value)  || 8,  1, 100),
-    raise:      clamp(parseFloat(document.getElementById('raise').value)     || 1.5, 0.1, 20),
-    lineSpacing: clamp(parseFloat(document.getElementById('lineSpacing').value) || 1.3, 0.8, 3),
-    textStyle:  document.querySelector('input[name="textStyle"]:checked').value,
-    plateColor: document.getElementById('plateColor').value,
-    textColor:  document.getElementById('textColor').value,
-  };
+  return normalizeSpec({
+    length:      document.getElementById('length').value,
+    width:       document.getElementById('width').value,
+    thickness:   document.getElementById('thickness').value,
+    radius:      document.getElementById('radius').value,
+    plateShape:  document.getElementById('plateShape').value,
+    text:        document.getElementById('text').value,
+    textMulti:   document.getElementById('textMulti').value,
+    mode:        document.querySelector('input[name="mode"]:checked').value,
+    fontUrl:     document.getElementById('font').value,
+    fontSize:    document.getElementById('fontSize').value,
+    raise:       document.getElementById('raise').value,
+    lineSpacing: document.getElementById('lineSpacing').value,
+    textStyle:   document.querySelector('input[name="textStyle"]:checked').value,
+    plateColor:  document.getElementById('plateColor').value,
+    textColor:   document.getElementById('textColor').value,
+  });
 }
 
 // ── Plate geometry (rounded-rectangle extrusion) ─────────────────────────────
