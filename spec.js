@@ -16,13 +16,18 @@
 // clamped to range. Passthrough string fields (plateShape, fontUrl, the
 // colors, mode, textStyle) are carried through unchanged.
 //
-// Behaviour is preserved exactly from the former inline readParams, including
-// the `parseFloat(v) || default` fallback — so a value of "0" yields the default,
-// not 0. That quirk is deliberate-preserved (pinned by spec.test.js), not
-// desired design; a future switch to `??` should be a loud, visible change.
+// A field falls back to its default only when it does not parse to a finite
+// number (missing, empty, or junk). An explicit "0" is a real value and is kept,
+// then clamped like any other — so `radius: 0` reaches the sharp-cornered
+// rectangle path in createPlateGeometry, and `length: 0` clamps up to its
+// minimum of 1. Note this cannot be written `parseFloat(v) ?? def`: parseFloat
+// returns NaN (not null/undefined) for junk, which `??` passes straight through.
 export function normalizeSpec(raw) {
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-  const num = (v, def, lo, hi) => clamp(parseFloat(v) || def, lo, hi);
+  const num = (v, def, lo, hi) => {
+    const n = parseFloat(v);
+    return clamp(Number.isFinite(n) ? n : def, lo, hi);
+  };
 
   const mode = raw.mode;
   let texts;

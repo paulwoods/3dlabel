@@ -30,7 +30,6 @@ test('length clamps to 1–500', () => {
 });
 
 test('thickness clamps to 0.5–50', () => {
-  // '0.1' (truthy, below min) clamps up; '0' would hit the default via the quirk.
   assert.equal(normalizeSpec({ ...base(), thickness: '0.1'  }).thickness, 0.5);
   assert.equal(normalizeSpec({ ...base(), thickness: '1000' }).thickness, 50);
 });
@@ -41,7 +40,6 @@ test('radius clamps to 0–100', () => {
 });
 
 test('lineSpacing clamps to 0.8–3', () => {
-  // '0.5' (truthy, below min) clamps up; '0' would hit the default via the quirk.
   assert.equal(normalizeSpec({ ...base(), lineSpacing: '0.5' }).lineSpacing, 0.8);
   assert.equal(normalizeSpec({ ...base(), lineSpacing: '10'  }).lineSpacing, 3);
 });
@@ -72,14 +70,31 @@ test('every numeric field has its default when omitted', () => {
   assert.equal(s.lineSpacing, 1.3);
 });
 
-// ── The `0 → default` quirk (preserved behaviour, not desired design) ────────
-// normalizeSpec uses `parseFloat(v) || default`, matching the former readParams.
-// A value of "0" parses to 0, which is falsy, so the default fires — NOT 0.
-// Pinned so a future switch to `??` is a loud, visible change.
-test('a value of "0" yields the default, not 0 (preserved quirk)', () => {
-  assert.equal(normalizeSpec({ ...base(), length: '0' }).length, 100);
-  assert.equal(normalizeSpec({ ...base(), radius: '0' }).radius, 5);
-  assert.equal(normalizeSpec({ ...base(), fontSize: '0' }).fontSize, 8);
+// ── An explicit "0" is a real value, not a missing one ───────────────────────
+// A falsy-check fallback (`parseFloat(v) || default`) would treat "0" as absent
+// and substitute the default. It is a real value: kept, then clamped normally.
+test('radius "0" is honoured — this is how a plain rectangle is requested', () => {
+  // radius has a minimum of 0, so 0 survives the clamp and reaches the
+  // sharp-cornered `r <= 0` branch of createPlateGeometry.
+  assert.equal(normalizeSpec({ ...base(), radius: '0' }).radius, 0);
+});
+
+test('"0" on a field with a positive minimum clamps up, it does not default', () => {
+  assert.equal(normalizeSpec({ ...base(), length: '0'      }).length, 1);
+  assert.equal(normalizeSpec({ ...base(), fontSize: '0'    }).fontSize, 1);
+  assert.equal(normalizeSpec({ ...base(), thickness: '0'   }).thickness, 0.5);
+  assert.equal(normalizeSpec({ ...base(), lineSpacing: '0' }).lineSpacing, 0.8);
+});
+
+// NaN must never escape into geometry — a NaN dimension yields an invisible or
+// corrupt mesh with no error. This is why the fallback tests a finite number
+// rather than using `??`, which would pass parseFloat's NaN straight through.
+test('unparseable input never yields NaN', () => {
+  for (const v of ['abc', '', undefined, null, {}]) {
+    const s = normalizeSpec({ ...base(), radius: v });
+    assert.ok(Number.isFinite(s.radius), `radius from ${JSON.stringify(v)} must be finite`);
+    assert.equal(s.radius, 5);
+  }
 });
 
 // ── mode → texts ──────────────────────────────────────────────────────────────
