@@ -5,7 +5,7 @@ import { TextGeometry }        from 'three/addons/geometries/TextGeometry.js';
 import { STLExporter }         from 'three/addons/exporters/STLExporter.js';
 import { mergeGeometries }     from 'three/addons/utils/BufferGeometryUtils.js';
 import { layoutLabels }        from './layout.js';
-import { buildLabelModel, isFontReady } from './label-model.js';
+import { buildLabelModel, isFontReady, labelParts, disposeLabelModel } from './label-model.js';
 import { build3mf }            from './threemf.js';
 import { normalizeSpec }       from './spec.js';
 import { FIELDS }              from './fields.js';
@@ -487,10 +487,8 @@ document.getElementById('btnSTL').addEventListener('click', () => {
   const { placements } = layoutLabels(p.texts.length, p.length, p.width, LABEL_GAP);
   const model = buildLabelModel(p, font, placements, exportOps);
   // Geometry is already export-baked (placed + print-transformed) per part.
-  const geosToMerge = model.flatMap(l => l.text ? [l.plate, l.text] : [l.plate]);
-
-  const exportGeo = mergeGeometries(geosToMerge);
-  geosToMerge.forEach(g => g.dispose());
+  const exportGeo = mergeGeometries(labelParts(model));
+  disposeLabelModel(model);
   if (!exportGeo) { console.error('mergeGeometries returned null'); alert('Export failed.'); return; }
 
   const tmpScene = new THREE.Scene();
@@ -516,7 +514,7 @@ function _make3mfBlob(p, multicolor) {
     labels: model, plateColor: p.plateColor, textColor: p.textColor, multicolor,
   });
 
-  model.forEach(({ plate, text }) => { plate.dispose(); if (text) text.dispose(); });
+  disposeLabelModel(model);
   return new Blob([bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+zip' });
 }
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLabelModel, isFontReady } from './label-model.js';
+import { buildLabelModel, isFontReady, labelParts, disposeLabelModel } from './label-model.js';
 
 // Fake ops: return tagged sentinels instead of THREE geometry, and record how
 // bakeForExport was called so the orchestration can be asserted without THREE.
@@ -54,6 +54,42 @@ test('each geometry is baked with its own placement and the spec thickness', () 
   // plate of label 1 baked at placement 1
   assert.deepEqual(ops.bakeCalls[0].placement, { x: -5, z: -5 });
   assert.deepEqual(ops.bakeCalls[2].placement, { x: 5, z: 5 });
+});
+
+// ── labelParts / disposeLabelModel ────────────────────────────────────────────
+// A geometry is anything with dispose(); these fakes record that it was called,
+// the same duck-typing threemf.js's tests use for the position accessor.
+const geo = name => ({ name, disposed: false, dispose() { this.disposed = true; } });
+
+test('labelParts flattens to plate-then-text per label, skipping absent text', () => {
+  // Order is the order STL merges in, so it decides the exported byte layout.
+  const model = [
+    { plate: geo('p0'), text: geo('t0') },
+    { plate: geo('p1'), text: null      },
+    { plate: geo('p2'), text: geo('t2') },
+  ];
+  assert.deepEqual(labelParts(model).map(g => g.name), ['p0', 't0', 'p1', 'p2', 't2']);
+});
+
+test('labelParts on an empty model is an empty list, not a crash', () => {
+  assert.deepEqual(labelParts([]), []);
+});
+
+test('disposeLabelModel disposes every geometry the model holds', () => {
+  // The whole ownership contract in one assertion: after the caller is done,
+  // nothing buildLabelModel created is still alive.
+  const model = [
+    { plate: geo('p0'), text: geo('t0') },
+    { plate: geo('p1'), text: null      },
+  ];
+  disposeLabelModel(model);
+  assert.ok(labelParts(model).every(g => g.disposed), 'every part must be disposed');
+});
+
+test('disposeLabelModel disposes text-less labels without touching null', () => {
+  const model = [{ plate: geo('p0'), text: null }];
+  disposeLabelModel(model);   // must not throw on the null text
+  assert.equal(model[0].plate.disposed, true);
 });
 
 test('isFontReady — truth table', () => {

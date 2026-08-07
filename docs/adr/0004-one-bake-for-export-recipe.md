@@ -47,7 +47,17 @@ home of the "Bake for export" term in `CONTEXT.md`.
   injected rather than imported, keeping the model headlessly testable.
 - **A shared ownership contract.** The model *creates* geometries and the caller
   must `dispose()` every `plate` and `text` it receives after merging /
-  serializing. Both exporters are now coupled to that contract; getting it wrong
-  leaks GPU memory. The contract is documented in `label-model.js`'s header.
+  serializing. Both exporters are coupled to that contract; getting it wrong
+  leaks GPU memory. It is documented in `label-model.js`'s header and satisfied
+  by the one `disposeLabelModel(model)` there — stating a contract and leaving
+  each caller to re-implement it was the gap, since STL disposed the list it had
+  flattened *for the merge* rather than the model it owned. Those two lists were
+  identical, so nothing leaked; but anything that later narrowed the merge input
+  would have silently narrowed the dispose list with it.
+- **A dispose bug here is invisible in the output.** THREE's `dispose()` releases
+  GPU buffers, not the JS-side attribute arrays, so a mistimed or missing dispose
+  still produces a byte-perfect STL or 3MF. Nothing about the exported file can
+  catch it — which is why `label-model.test.js` asserts the contract directly
+  (every part of a model is disposed) instead of relying on export assertions.
 - Depends on [ADR-0005](0005-bake-print-orientation.md) for step 3 and
   [ADR-0002](0002-pure-cores-injected-ops.md) for the injection mechanism.
