@@ -8,6 +8,7 @@ import { layoutLabels }        from './layout.js';
 import { buildLabelModel, isFontReady } from './label-model.js';
 import { build3mf }            from './threemf.js';
 import { normalizeSpec }       from './spec.js';
+import { FIELDS }              from './fields.js';
 import { fitRadius, planTextPlacement, printMatrix } from './geometry-math.js';
 
 // ── Font catalogue ────────────────────────────────────────────────────────────
@@ -94,29 +95,47 @@ renderer.setAnimationLoop(() => {
 let labelMeshes = [];
 let rebuildTimer = null;
 
+// ── Field ↔ DOM adapter ───────────────────────────────────────────────────────
+// The FIELDS manifest says which parameters exist; these three say how one maps
+// onto the DOM. Everything below — the parameter reader, settings serialisation,
+// and the change listeners — derives from the manifest through them, so a new
+// field is one manifest entry plus markup rather than four coordinated edits.
+//
+// A radio field has no single element: its `id` is the group's shared `name`.
+// That is the only shape that isn't `element.value`.
+function fieldElements(f) {
+  return f.kind === 'radio'
+    ? [...document.querySelectorAll(`input[name="${f.id}"]`)]
+    : [document.getElementById(f.id)];
+}
+
+function readField(f) {
+  return f.kind === 'radio'
+    ? document.querySelector(`input[name="${f.id}"]:checked`).value
+    : document.getElementById(f.id).value;
+}
+
+function writeField(f, value) {
+  if (f.kind === 'radio') {
+    const radio = document.querySelector(`input[name="${f.id}"][value="${value}"]`);
+    if (radio) radio.checked = true;
+  } else {
+    document.getElementById(f.id).value = value;
+  }
+}
+
+// <select> and radio groups fire `change`; typed and picked inputs fire `input`.
+const fieldEvent = f => (f.kind === 'select' || f.kind === 'radio') ? 'change' : 'input';
+
 // ── Parameter reader ──────────────────────────────────────────────────────────
 // Thin DOM adapter: gathers raw form values (as strings) and hands them to the
 // pure, headlessly-tested normalizeSpec in spec.js. The clamps, defaults, and
 // mode → texts expansion live there — one tested seam between the DOM and the
 // rest of the app. An instance of the pure-core pattern (ADR-0002).
 function readParams() {
-  return normalizeSpec({
-    length:      document.getElementById('length').value,
-    width:       document.getElementById('width').value,
-    thickness:   document.getElementById('thickness').value,
-    radius:      document.getElementById('radius').value,
-    plateShape:  document.getElementById('plateShape').value,
-    text:        document.getElementById('text').value,
-    textMulti:   document.getElementById('textMulti').value,
-    mode:        document.querySelector('input[name="mode"]:checked').value,
-    fontUrl:     document.getElementById('font').value,
-    fontSize:    document.getElementById('fontSize').value,
-    raise:       document.getElementById('raise').value,
-    lineSpacing: document.getElementById('lineSpacing').value,
-    textStyle:   document.querySelector('input[name="textStyle"]:checked').value,
-    plateColor:  document.getElementById('plateColor').value,
-    textColor:   document.getElementById('textColor').value,
-  });
+  const raw = {};
+  for (const f of FIELDS) raw[f.key] = readField(f);
+  return normalizeSpec(raw);
 }
 
 // ── Plate geometry (rounded-rectangle extrusion) ─────────────────────────────
@@ -302,36 +321,30 @@ function scheduleRebuild() {
 
 // ── LocalStorage persistence ──────────────────────────────────────────────────
 const STORAGE_KEY = '3dlabel_v1';
-const PERSISTED_IDS = ['length','width','thickness','radius','plateShape','text','font','fontSize','raise','lineSpacing','plateColor','textColor','textMulti'];
 
 // ── Settings (form ↔ plain object) ────────────────────────────────────────────
 // One pair of functions is the single source of truth for serialising the form.
 // localStorage and the settings file are two adapters over them. applySettings
 // only writes the DOM — callers decide whether to re-save / rebuild afterwards.
+//
+// Settings are keyed by the manifest's `id`, not its `key`: the saved JSON has
+// always used `font`, and re-keying it would orphan that value in every settings
+// file already on disk.
 function readSettings() {
   const data = {};
-  PERSISTED_IDS.forEach(id => { data[id] = document.getElementById(id).value; });
-  data.mode = document.querySelector('input[name="mode"]:checked').value;
-  data.textStyle = document.querySelector('input[name="textStyle"]:checked').value;
+  for (const f of FIELDS) data[f.id] = readField(f);
   return data;
 }
 
 function applySettings(data) {
-  PERSISTED_IDS.forEach(id => {
-    const el = document.getElementById(id);
-    if (el && data[id] !== undefined) el.value = data[id];
-  });
-  if (data.mode) {
-    const radio = document.querySelector(`input[name="mode"][value="${data.mode}"]`);
-    if (radio) { radio.checked = true; applyModeUI(data.mode); }
+  for (const f of FIELDS) {
+    if (data[f.id] !== undefined) writeField(f, data[f.id]);
   }
-  if (data.textStyle) {
-    const styleRadio = document.querySelector(`input[name="textStyle"][value="${data.textStyle}"]`);
-    if (styleRadio) styleRadio.checked = true;
-  }
-  // Keep hex text fields in sync with restored colour picker values.
+  // Companion UI that isn't itself a field: the hex mirrors of the colour
+  // pickers, and the two panels driven by mode / plate shape.
   document.getElementById('plateColorHex').value = document.getElementById('plateColor').value;
   document.getElementById('textColorHex').value  = document.getElementById('textColor').value;
+  applyModeUI(document.querySelector('input[name="mode"]:checked').value);
   applyShapeUI();
 }
 
@@ -346,21 +359,16 @@ function loadFromStorage() {
   } catch (_) { /* corrupt storage — ignore */ }
 }
 
-['length','width','thickness','radius','text','fontSize','raise','lineSpacing'].forEach(id =>
-  document.getElementById(id).addEventListener('input', () => { saveToStorage(); scheduleRebuild(); })
-);
-document.getElementById('font').addEventListener('change', () => { saveToStorage(); scheduleRebuild(); });
-document.getElementById('textMulti').addEventListener('input', () => { saveToStorage(); scheduleRebuild(); });
+// Every field persists and rebuilds when it changes. Fields that also drive UI
+// state add a second listener below — addEventListener stacks, and the two are
+// independent (neither reads what the other writes).
+for (const f of FIELDS) {
+  for (const el of fieldElements(f)) {
+    el.addEventListener(fieldEvent(f), () => { saveToStorage(); scheduleRebuild(); });
+  }
+}
 
-document.getElementById('plateShape').addEventListener('change', () => {
-  applyShapeUI();
-  saveToStorage();
-  scheduleRebuild();
-});
-
-document.querySelectorAll('input[name="textStyle"]').forEach(radio =>
-  radio.addEventListener('change', () => { saveToStorage(); scheduleRebuild(); })
-);
+document.getElementById('plateShape').addEventListener('change', applyShapeUI);
 
 function applyModeUI(mode) {
   document.getElementById('fieldTextSingle').style.display   = mode === 'single'   ? '' : 'none';
@@ -374,23 +382,21 @@ function applyShapeUI() {
 }
 
 document.querySelectorAll('input[name="mode"]').forEach(radio =>
-  radio.addEventListener('change', e => {
-    applyModeUI(e.target.value);
-    saveToStorage();
-    scheduleRebuild();
-  })
+  radio.addEventListener('change', e => applyModeUI(e.target.value))
 );
 
-// Sync colour pickers ↔ hex text fields
+// Sync colour pickers ↔ hex text fields. The pickers are FIELDS, so the loop
+// above already saves and rebuilds for them; this only mirrors the value across.
+// The hex inputs are *not* fields — they are a second way to drive the same
+// picker — and writing `picker.value` from script fires no event, so that
+// direction has to save and rebuild itself.
 function syncColor(pickerId, hexId) {
-  document.getElementById(pickerId).addEventListener('input', e => {
-    document.getElementById(hexId).value = e.target.value;
-    saveToStorage();
-    scheduleRebuild();
-  });
-  document.getElementById(hexId).addEventListener('input', e => {
-    if (/^#[0-9a-f]{6}$/i.test(e.target.value)) {
-      document.getElementById(pickerId).value = e.target.value;
+  const picker = document.getElementById(pickerId);
+  const hex    = document.getElementById(hexId);
+  picker.addEventListener('input', () => { hex.value = picker.value; });
+  hex.addEventListener('input', () => {
+    if (/^#[0-9a-f]{6}$/i.test(hex.value)) {
+      picker.value = hex.value;
       saveToStorage();
       scheduleRebuild();
     }

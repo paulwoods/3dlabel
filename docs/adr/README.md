@@ -30,6 +30,7 @@ for export**, **Ops**, **3MF document**, **Settings**).
 | [0005](0005-bake-print-orientation.md) | Bake the Y-up → Z-up print orientation into exported geometry | Accepted |
 | [0006](0006-hand-rolled-3mf.md) | Hand-roll the 3MF package instead of taking a dependency | Accepted |
 | [0007](0007-settings-serialization-pair.md) | One settings serialization pair; localStorage and file are adapters | Accepted |
+| [0008](0008-one-field-manifest.md) | One field manifest drives validation, reading, persistence, and wiring | Accepted |
 
 ## Relationships
 
@@ -40,4 +41,5 @@ for export**, **Ops**, **3MF document**, **Settings**).
                    │                  └─ applies ──> 0005 (print transform)
                    └─ instance ──> 0006 (hand-rolled 3MF document)
 0003 (layout SSOT) ── same SSOT discipline as ──> 0007 (settings pair)
+                                                    └─ extended by ──> 0008 (field manifest)
 ```

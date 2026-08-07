@@ -37,7 +37,9 @@ because two independent callers need exactly it.
 ## Consequences
 
 - **A new field is one edit.** Add it to `readSettings`/`applySettings` and both
-  adapters inherit it; they can no longer disagree about what a setting is.
+  adapters inherit it; they can no longer disagree about what a setting is. Since
+  [ADR-0008](0008-one-field-manifest.md) the pair iterates the `FIELDS` manifest,
+  so it is not even that edit — the hand-maintained `PERSISTED_IDS` list is gone.
 - **The seam is earned, not speculative.** Two concrete adapters justify it; it
   isn't an abstraction added "just in case."
 - **`applySettings`'s no-side-effect contract is subtle.** Because it only writes
