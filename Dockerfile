@@ -2,8 +2,9 @@
 # pulling this image, and a moving base tag would change the server underneath
 # an otherwise unchanged app. `alpine` tracks nginx *mainline*, so this is the
 # 1.31 line and not the 1.30 stable line — pinning to `1.30-alpine` would be a
-# downgrade, not a freeze.
-FROM nginx:1.31-alpine
+# downgrade, not a freeze. Pinned to the patch release too, so a rebuild is
+# reproducible; bump it by hand to pick up nginx/Alpine security fixes.
+FROM nginx:1.31.9-alpine
 
 COPY index.html style.css *.js /usr/share/nginx/html/
 
